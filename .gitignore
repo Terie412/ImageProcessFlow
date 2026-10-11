@@ -44,6 +44,10 @@ settings.json
 # ---------- 测试产生的截图 ----------
 runtime/uicheck_*.png
 
+# ---------- 无头 Chrome 的用户数据目录（runtime/shot.js 等会生成，几十 MB）----------
+runtime/chrome-profile/
+**/chrome-profile/
+
 # ---------- 编辑器 / 系统杂项 ----------
 .vscode/
 .idea/

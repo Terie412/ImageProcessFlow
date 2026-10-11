@@ -55,6 +55,10 @@ DEFAULT_SETTINGS: dict = {
     "textModelName": "deepseek-v4-flash-vision-exp",
     # 上次打开过的工作目录：下次启动自动打开，省得每次都要重选一遍
     "lastWorkspace": "",
+    # 网格吸附：开启后拖动节点会吸到格点上，落盘的坐标也一律对齐到格点
+    "snapToGrid": False,
+    # 吸附格大小（px）
+    "gridSize": 5,
     # 每种节点的最小尺寸（画布坐标），按**具体节点类型**分：
     #   resource              → 数据节点
     #   process:<defId>       → 某个具体的处理节点类型（如 process:qwen_image）
@@ -114,6 +118,14 @@ def _coerce_setting(key: str, value, current: dict):
     """校验/规范化一个设置项；不合法返回 None（调用方跳过这一项）。"""
     if key == "nodeMin":
         return _coerce_node_min(value, current.get("nodeMin"))
+    if key == "gridSize":
+        # 允许 "5" / 5 / 5.0 这类写法，取整后夹到合理区间 —— 0 会让吸附退化成空操作
+        try:
+            n = int(round(float(value)))
+        except (TypeError, ValueError):
+            return None
+        lo, hi = engine_mod.GRID_SIZE_RANGE
+        return max(lo, min(hi, n))
     if isinstance(value, type(DEFAULT_SETTINGS[key])):
         return value.strip() if isinstance(value, str) else value
     return None
@@ -234,10 +246,25 @@ def _open_workspace(path: str | Path) -> Workspace:
     STATE["graph"] = _migrate(w.load())
     STATE["settings"]["lastWorkspace"] = str(w.root)
     save_settings(STATE["settings"])
+    # 开着网格吸附的话，打开时顺手把没对齐的坐标收齐（老项目/别人传过来的画布）
+    if STATE["settings"].get("snapToGrid"):
+        persist()
     return w
 
 
 def persist() -> None:
+    """落盘画布。**所有**坐标写入都收口在这里，所以网格吸附也在这里统一执行。
+
+    排在 save 之前，是为了让「存下去的就是画布上看到的」：开着吸附时，
+    内存里的图与磁盘上的 json 都是对齐过的坐标。
+
+    这里是**就近**吸附（最近的格点）—— 手动拖、导入图片这类「用户指哪打哪」
+    的位置用就近；而程序算出来的布局（输出槽位、重排）在算的时候就用
+    `engine.snap_up` 向上吸附，保证间距下限不被破坏（见 engine.snap_graph）。
+    """
+    n = engine_mod.snap_graph(STATE["graph"], STATE["settings"])
+    if n:
+        print(f"[画布] 网格吸附：{n} 个节点已就近对齐到格点")
     ws().save(STATE["graph"])
 
 
@@ -365,6 +392,9 @@ def api_update_settings(payload: dict):
             if clean is not None:
                 s[k] = clean
         save_settings(s)
+        # 吸附开着就顺手把整个画布收一遍 —— 这就是「开启之后检查所有节点」那一步
+        if s.get("snapToGrid"):
+            persist()
     return state_payload()
 
 
@@ -993,13 +1023,18 @@ def main() -> None:
     reload_registry()
     print(f"[启动] 已注册脚本: {', '.join(STATE['registry']) or '（无）'}")
 
-    # 命令行给了就用给的；没给就自动打开「上次用过的」，省得每次回界面重选
-    boot_ws = args.workspace or (STATE["settings"].get("lastWorkspace") or "")
-    if boot_ws and Path(boot_ws).is_dir():
-        w = _open_workspace(boot_ws)
+    # 命令行给了就用给的（目录不存在就建出来 —— start.bat -w <新目录> 一直是这个语义）；
+    # 没给才自动打开「上次用过的」，那个可能已经被删掉了，所以要判存在
+    if args.workspace:
+        w = _open_workspace(args.workspace)
         print(f"[启动] 工作目录: {w.root}")
-    elif boot_ws:
-        print(f"[启动] 上次的工作目录已不存在，忽略: {boot_ws}")
+    else:
+        last = STATE["settings"].get("lastWorkspace") or ""
+        if last and Path(last).is_dir():
+            w = _open_workspace(last)
+            print(f"[启动] 工作目录: {w.root}（上次用过的）")
+        elif last:
+            print(f"[启动] 上次的工作目录已不存在，忽略: {last}")
 
     # 清理上次残留的临时目录
     if STATE["workspace"] is not None:

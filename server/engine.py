@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -75,6 +76,9 @@ def slot_origin(proc: dict, manifest: dict, settings: dict | None) -> tuple[floa
 
     横向按**处理节点的实际宽度**让开（不写死偏移量）；纵向的累加见
     `resource_height()` —— 每个槽位从上**一个节点的实际高度**往下排。
+
+    吸附开着时用**向上**吸附：横向的 `+SLOT_GAP_X`、纵向的 `+SLOT_GAP_Y`
+    都是下限，就近吸附会把它们啃掉几个像素。
     """
     min_w, _ = _node_min(
         settings, f"process:{proc.get('defId')}", (PROCESS_DEFAULT_W, RESOURCE_DEFAULT_H)
@@ -84,7 +88,80 @@ def slot_origin(proc: dict, manifest: dict, settings: dict | None) -> tuple[floa
         min_w,
         _as_float(proc.get("w")) or _as_float(sz.get("defaultWidth")) or PROCESS_DEFAULT_W,
     )
-    return (proc.get("x", 0) + proc_w + SLOT_GAP_X, proc.get("y", 0))
+    g = grid_size(settings)
+    return (
+        snap_up(proc.get("x", 0) + proc_w + SLOT_GAP_X, g),
+        snap_up(proc.get("y", 0), g),
+    )
+
+
+# --------------------------------------------------------------------------
+# 网格吸附
+# --------------------------------------------------------------------------
+GRID_SIZE_RANGE = (1, 200)   # 吸附格的允许区间（px），前后端保持一致
+
+
+def grid_size(settings: dict | None) -> float:
+    """当前生效的吸附格大小；没开吸附（或值不合法）返回 0。"""
+    s = settings or {}
+    if not s.get("snapToGrid"):
+        return 0.0
+    try:
+        g = float(s.get("gridSize") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return g if g >= GRID_SIZE_RANGE[0] else 0.0
+
+
+def snap_value(v: float, g: float) -> float:
+    """**就近**吸附：吸到最近的格点，位移最大半个格。"""
+    return round(v / g) * g if g > 0 else v
+
+
+def snap_up(v: float, g: float) -> float:
+    """**向上**吸附：吸到不小于 v 的那个格点。
+
+    给「程序算出来的布局」用（输出槽位、重排）：这类位置有一条**下限**约束
+    （相邻间距不能小于 SLOT_GAP_Y，否则节点会压在一起），就近吸附会把间距
+    啃掉最多半个格。向上取整则保证间距只会变大一点点、绝不会变小。
+    """
+    if g <= 0:
+        return v
+    return math.ceil(v / g - 1e-9) * g
+
+
+def snap_graph(graph: dict, settings: dict | None) -> int:
+    """把画布上所有节点（数据节点 + 处理节点）的坐标**就近**对齐到吸附格。
+
+    返回被移动的节点数。只动**不对齐**的那些，所以连点两次是幂等的。
+    吸附关着的时候是空操作。
+
+    这里刻意做成「落盘前的统一收口」（见 main.persist）：只要吸附开着，
+    凡是被写进 graph.json 的坐标都满足吸附规则。因此不光是用户拖动的节点，
+    连「脚本执行时引擎自己摆的输出槽位」「重排输出节点」「导入图片」落下
+    的位置也一并收齐 —— 不会出现画布上一半对齐、一半没对齐的状态。
+    """
+    g = grid_size(settings)
+    if g <= 0:
+        return 0
+    moved = 0
+    for node in [*graph.get("resources", []), *graph.get("processes", [])]:
+        hit = False
+        for axis in ("x", "y"):
+            raw = node.get(axis)
+            if raw is None:
+                continue
+            try:
+                v = float(raw)
+            except (TypeError, ValueError):
+                continue
+            snapped = snap_value(v, g)
+            if abs(snapped - v) > 1e-9:
+                node[axis] = snapped
+                hit = True
+        if hit:
+            moved += 1
+    return moved
 
 
 def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
@@ -92,8 +169,13 @@ def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
 
     纵向间距按**每个节点自己的高度**逐个累加，所以高低不一的一组也能紧凑排好。
 
+    吸附开着时，累加出来的位置**向上**吸到格点：先满足吸附规则，再尽量让间距
+    不小于 `SLOT_GAP_Y`（就近吸附可能把 10px 的缝啃成 7px，向上取整则只会变成
+    12~14px）。**所有会挪动节点的功能都按这个优先级来**，见 DESIGN.md §3.10。
+
     返回被移动的节点数。用于收拾历史上被写死偏移量摆歪的画布。
     """
+    g = grid_size(settings)
     procs = {p["id"]: p for p in graph.get("processes", [])}
     groups: dict[str, list[dict]] = {}
     for r in graph.get("resources", []):
@@ -110,7 +192,7 @@ def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
             if _as_float(r.get("x")) != base_x or _as_float(r.get("y")) != y:
                 r["x"], r["y"] = base_x, y
                 moved += 1
-            y += resource_height(r, settings) + SLOT_GAP_Y
+            y = snap_up(y + resource_height(r, settings) + SLOT_GAP_Y, g)
     return moved
 
 
@@ -385,8 +467,12 @@ def execute(
             ws.delete_image(r["name"])  # 原地刷新：删掉旧文件
         # 下一个槽位从**这一个节点自己的位置和高度**往下让开一点点：
         # 已有槽位的位置不会被改动（用户手动拖过就尊重用户），但间距得按它的实际
-        # 高度算，否则节点调矮之后中间会空出一大截。
-        cursor_y = _as_float(r.get("y"), cursor_y) + resource_height(r, settings) + SLOT_GAP_Y
+        # 高度算，否则节点调矮之后中间会空出一大截。吸附开着时向上吸到格点，
+        # 保证间距不小于 SLOT_GAP_Y。
+        cursor_y = snap_up(
+            _as_float(r.get("y"), cursor_y) + resource_height(r, settings) + SLOT_GAP_Y,
+            grid_size(settings),
+        )
         dest = ws.images_dir / f"{r['name']}{src.suffix.lower()}"
         shutil.move(str(src), str(dest))
 

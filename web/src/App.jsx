@@ -32,6 +32,15 @@ const clampMin = (v) => {
   return Math.max(MIN_RANGE[0], Math.min(MIN_RANGE[1], Math.round(n)))
 }
 
+// 网格吸附：格子大小的允许区间与服务端 engine.GRID_SIZE_RANGE 保持一致
+const GRID_RANGE = [1, 200]
+const GRID_DEFAULT = 5
+const clampGrid = (v) => {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.max(GRID_RANGE[0], Math.min(GRID_RANGE[1], Math.round(n)))
+}
+
 /*
  * 最小尺寸按「具体节点类型」存，不是按大类：
  *   nodeMin.resource          → 数据节点
@@ -457,7 +466,6 @@ export default function App() {
   const onNodeDragStop = useCallback((evt, node) => {
     api.savePositions([{ id: node.id, x: node.position.x, y: node.position.y }]).catch(() => {})
   }, [])
-
   // 双击数据节点 → 打开大图查看器（缩略图太小，抠图这种活必须能放大看）
   const onNodeDoubleClick = useCallback((evt, node) => {
     const d = node?.data
@@ -613,9 +621,26 @@ export default function App() {
   /* ---- 设置浮层里的「节点最小尺寸」：本地草稿（按具体节点类型分组），失焦时才提交 ---- */
   const [minDraft, setMinDraft] = useState(null)
 
+  /* ---- 网格吸附：格大小也是一个失焦才提交的草稿；格点尺寸给 ReactFlow 用 ---- */
+  const [gridDraft, setGridDraft] = useState(null)
+  const gridSize = clampGrid(state?.settings?.gridSize ?? GRID_DEFAULT) ?? GRID_DEFAULT
+
+  const commitGrid = useCallback(
+    (raw) => {
+      setGridDraft(null) // 清掉草稿 → 输入框退回显示服务端的值（被夹过的那个）
+      const v = clampGrid(raw)
+      if (v === null || v === gridSize) return
+      saveSetting('gridSize', v)
+    },
+    [gridSize, saveSetting],
+  )
+
   const toggleSettings = useCallback(() => {
     // 打开时清空草稿：输入框会直接显示服务端的当前值
-    if (!showSettings) setMinDraft({})
+    if (!showSettings) {
+      setMinDraft({})
+      setGridDraft(null)
+    }
     setShowSettings((v) => !v)
   }, [showSettings])
 
@@ -804,6 +829,33 @@ export default function App() {
               </label>
 
               <div className="set-sep" />
+              <div className="set-group">网格吸附</div>
+              <label className="set-row">
+                <input
+                  type="checkbox"
+                  checked={!!state?.settings?.snapToGrid}
+                  onChange={(e) => saveSetting('snapToGrid', e.target.checked)}
+                />
+                <span>拖动节点时吸附到网格</span>
+              </label>
+              <label className="set-field">
+                <span>网格大小</span>
+                <div className="set-size">
+                  <input
+                    type="number"
+                    min={GRID_RANGE[0]}
+                    max={GRID_RANGE[1]}
+                    step={1}
+                    value={gridDraft ?? gridSize}
+                    onChange={(e) => setGridDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                    onBlur={(e) => commitGrid(e.target.value)}
+                  />
+                  <span className="set-x">px</span>
+                </div>
+              </label>
+
+              <div className="set-sep" />
               <div className="set-group">节点最小尺寸</div>
               {minRows(state).map((row) => {
                 const eff = minSizeOf(state, row.key, row.dflt)
@@ -870,6 +922,10 @@ export default function App() {
           onNodeDoubleClick={onNodeDoubleClick}
           onNodeContextMenu={(e) => e.preventDefault()}
           nodeTypes={nodeTypes}
+          /* 网格吸附：拖动时就吸到格点上（服务端在落盘时还会再兜一遍，
+             见 DESIGN.md §3.10）。关掉时 snapGrid 不起作用。 */
+          snapToGrid={!!state?.settings?.snapToGrid}
+          snapGrid={[gridSize, gridSize]}
           fitView
           minZoom={0.2}
           maxZoom={2}
