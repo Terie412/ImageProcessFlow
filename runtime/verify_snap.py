@@ -149,6 +149,9 @@ def part_b() -> None:
     (TMPSCRIPT / "gen.py").write_text(SNAP_SCRIPT, encoding="utf-8")
     try:
         req("POST", "/api/registry/reload")
+        # 设置是工程级共用的（settings.json 不在工作目录里），别的测试或界面可能
+        # 把它开着。先明确关掉，否则下面"造几个不对齐的节点"会被就地吸走。
+        req("PATCH", "/api/settings", {"snapToGrid": False})
         shutil.rmtree(TMPWS, ignore_errors=True)
         req("POST", "/api/workspace", {"path": str(TMPWS)})
 
@@ -165,6 +168,8 @@ def part_b() -> None:
 
         st = req("PATCH", "/api/settings", {"snapToGrid": True, "gridSize": 5})
         after = [(p["id"], p["x"], p["y"]) for p in st["graph"]["processes"]]
+        check("贴的是 5 的格（不是别的格大小）",
+              st["settings"]["gridSize"] == 5, str(st["settings"]["gridSize"]))
         print(f"   开启后：{[(round(x, 2), round(y, 2)) for _, x, y in after]}")
         check("开启吸附会返回新状态（前端据此重绘）", "graph" in st, "")
         check("所有节点坐标都被收齐（5 的倍数）",
@@ -177,9 +182,10 @@ def part_b() -> None:
               str(dict((i, (x, y)) for i, x, y in after)[pid2]))
 
         # 落盘也应该是收齐的（重开实例才会一样）
-        raw = json.loads((TMPWS / "graph.json").read_text(encoding="utf-8"))
+        doc = json.loads((TMPWS / "graph.json").read_text(encoding="utf-8"))
+        cur = next(c for c in doc["canvases"] if c["id"] == doc["current"])
         check("graph.json 里存的坐标也是收齐的",
-              all(p["x"] % 5 == 0 and p["y"] % 5 == 0 for p in raw["processes"]), "")
+              all(p["x"] % 5 == 0 and p["y"] % 5 == 0 for p in cur["processes"]), "")
 
         # 执行一个节点 → 新增的输出槽位也该落在格点上
         n_slots = 4

@@ -26,7 +26,7 @@ import detect as detect_mod
 import engine as engine_mod
 import polish as polish_mod
 import registry as registry_mod
-from workspace import IMAGE_EXTS, Workspace, drop_tree
+from workspace import IMAGE_EXTS, CanvasView, Workspace, drop_tree
 
 try:
     from PIL import Image as _PILImage
@@ -156,7 +156,8 @@ def save_settings(s: dict) -> None:
 
 STATE: dict = {
     "workspace": None,   # type: Workspace | None
-    "graph": None,
+    "doc": None,         # 画布文档 {version, current, canvases:[…]}
+    "graph": None,       # **当前画布那个 dict 本身**（doc.canvases 里的同一对象）
     "registry": {},
     "settings": load_settings(),
 }
@@ -229,10 +230,59 @@ def _migrate(g: dict) -> dict:
     return g
 
 
+# --------------------------------------------------------------------------
+# 画布文档：一个工作目录里有多个画布
+#
+# 磁盘上只有一个 graph.json（{version:2, current, canvases:[…]}），一次原子写。
+# 内存里 STATE["doc"] 是整份文档，STATE["graph"] 指向**当前画布那个 dict 本身**
+# （同一个对象，不是副本）—— 所以到处在用的 `g = graph()` + 就地改字段照旧生效，
+# 切画布只是换个引用。图片池按画布分，引擎只跟 `view()`（当前画布的文件面）打交道。
+# --------------------------------------------------------------------------
+def doc() -> dict:
+    """画布文档；第一次访问时从磁盘读（顺带完成 v1→v2 迁移）。"""
+    if STATE["doc"] is None:
+        d = ws().load_doc()
+        for c in d["canvases"]:
+            _migrate(c)
+        STATE["doc"] = d
+        _focus(d)
+    return STATE["doc"]
+
+
+def _focus(d: dict, canvas_id: str | None = None) -> dict:
+    """把当前画布切到 canvas_id（不传就沿用文档里记的那个），并让 STATE["graph"] 指向它。"""
+    if canvas_id and any(c["id"] == canvas_id for c in d["canvases"]):
+        d["current"] = canvas_id
+    cur = next((c for c in d["canvases"] if c["id"] == d.get("current")), d["canvases"][0])
+    d["current"] = cur["id"]
+    STATE["graph"] = cur
+    return cur
+
+
 def graph() -> dict:
-    if STATE["graph"] is None:
-        STATE["graph"] = _migrate(ws().load())
-    return STATE["graph"]
+    return STATE["graph"] if STATE["graph"] is not None else _focus(doc())
+
+
+def canvas() -> dict:
+    """当前画布（id / name / viewport 与图本身都在里面）。"""
+    return _focus(doc())
+
+
+def view() -> CanvasView:
+    """当前画布的**文件面**（图片池 + 临时目录）。引擎要的就是它。"""
+    return ws().view(canvas()["id"])
+
+
+def canvas_list(d: dict) -> list[dict]:
+    return [
+        {
+            "id": c["id"],
+            "name": c["name"],
+            "nodeCount": len(c.get("resources", [])) + len(c.get("processes", [])),
+            "viewport": c.get("viewport"),
+        }
+        for c in d["canvases"]
+    ]
 
 
 def _open_workspace(path: str | Path) -> Workspace:
@@ -243,9 +293,11 @@ def _open_workspace(path: str | Path) -> Workspace:
     w = Workspace(path)
     w.ensure()
     STATE["workspace"] = w
-    STATE["graph"] = _migrate(w.load())
+    STATE["doc"] = None      # 丢掉上一个工作目录的文档
+    STATE["graph"] = None
     STATE["settings"]["lastWorkspace"] = str(w.root)
     save_settings(STATE["settings"])
+    doc()                    # 读盘 + 迁移 + 定位到上次用的那个画布
     # 开着网格吸附的话，打开时顺手把没对齐的坐标收齐（老项目/别人传过来的画布）
     if STATE["settings"].get("snapToGrid"):
         persist()
@@ -253,7 +305,7 @@ def _open_workspace(path: str | Path) -> Workspace:
 
 
 def persist() -> None:
-    """落盘画布。**所有**坐标写入都收口在这里，所以网格吸附也在这里统一执行。
+    """落盘画布文档。**所有**坐标写入都收口在这里，所以网格吸附也在这里统一执行。
 
     排在 save 之前，是为了让「存下去的就是画布上看到的」：开着吸附时，
     内存里的图与磁盘上的 json 都是对齐过的坐标。
@@ -261,19 +313,27 @@ def persist() -> None:
     这里是**就近**吸附（最近的格点）—— 手动拖、导入图片这类「用户指哪打哪」
     的位置用就近；而程序算出来的布局（输出槽位、重排）在算的时候就用
     `engine.snap_up` 向上吸附，保证间距下限不被破坏（见 engine.snap_graph）。
+
+    文档里的**所有画布一起收** —— 它们都在内存里，吸附规则又是全局的，
+    没道理只收当前这一个。
     """
-    n = engine_mod.snap_graph(STATE["graph"], STATE["settings"])
-    if n:
-        print(f"[画布] 网格吸附：{n} 个节点已就近对齐到格点")
-    ws().save(STATE["graph"])
+    d = doc()
+    moved = sum(engine_mod.snap_graph(c, STATE["settings"]) for c in d["canvases"])
+    if moved:
+        print(f"[画布] 网格吸附：{moved} 个节点已就近对齐到格点")
+    ws().save_doc(d)
 
 
 def reload_registry() -> None:
     STATE["registry"] = registry_mod.load_manifests(SCRIPTS_DIR)
 
 
-def _decorate(g: dict) -> dict:
-    """给数据节点补上图片文件信息（供前端做缓存失效）。"""
+def _decorate(g: dict, canvas_id: str | None = None) -> dict:
+    """给数据节点补上图片文件信息（供前端做缓存失效）。
+
+    图片池是按画布分的，同一个短名（比如 A）在不同画布下是**不同的文件** ——
+    所以这里必须带上画布 id，否则会把别的画布的 A 的尺寸显示过来。
+    """
     w = STATE["workspace"]
     out = json.loads(json.dumps(g))
     for r in out["resources"]:
@@ -282,8 +342,8 @@ def _decorate(g: dict) -> dict:
         r["width"] = None
         r["height"] = None
         r["format"] = None
-        if w is not None:
-            p = w.image_path(r.get("name", ""))
+        if w is not None and canvas_id:
+            p = w.image_path(canvas_id, r.get("name", ""))
             if p is not None:
                 r["hasImage"] = True
                 r["mtime"] = int(p.stat().st_mtime)
@@ -310,11 +370,13 @@ def _decorate(g: dict) -> dict:
 
 def state_payload() -> dict:
     w = STATE["workspace"]
-    g = graph()
+    d = doc()
     return {
         "workspace": str(w.root) if w is not None else None,
         "workspaceDir": str(w.root) if w is not None else None,
-        "graph": _decorate(g),
+        "canvasId": d["current"],
+        "canvases": canvas_list(d),
+        "graph": _decorate(graph(), d["current"]),
         "manifests": {k: registry_mod.public_manifest(v) for k, v in STATE["registry"].items()},
         "settings": dict(STATE["settings"]),
     }
@@ -374,11 +436,222 @@ def api_state():
 @app.post("/api/registry/reload")
 def api_registry_reload():
     reload_registry()
-    # 脚本换了以后，画布上可能残留已经失效的参数值，顺手修正
+    # 脚本换了以后，画布上可能残留已经失效的参数值，顺手修正 —— 所有画布都要修
     with LOCK:
-        STATE["graph"] = _migrate(graph())
+        for c in doc()["canvases"]:
+            _migrate(c)
         persist()
     return state_payload()
+
+
+# --------------------------------------------------------------------------
+# 画布
+# --------------------------------------------------------------------------
+@app.post("/api/canvases")
+def api_create_canvas(payload: dict):
+    """新建一个画布并切过去。"""
+    with LOCK:
+        d = doc()
+        c = ws().create_canvas(d, (payload or {}).get("name"))
+        _focus(d, c["id"])
+        persist()
+    return state_payload()
+
+
+@app.post("/api/canvases/{cid}/open")
+def api_open_canvas(cid: str):
+    """切换到指定画布。"""
+    with LOCK:
+        d = doc()
+        if not any(c["id"] == cid for c in d["canvases"]):
+            raise HTTPException(404, "画布不存在")
+        _focus(d, cid)
+        persist()
+    return state_payload()
+
+
+@app.patch("/api/canvases/{cid}")
+def api_update_canvas(cid: str, payload: dict):
+    """改画布名 / 记住它的视野（前端切走时把当前的缩放平移发过来）。"""
+    with LOCK:
+        d = doc()
+        c = next((x for x in d["canvases"] if x["id"] == cid), None)
+        if c is None:
+            raise HTTPException(404, "画布不存在")
+        name = (payload or {}).get("name")
+        if isinstance(name, str) and name.strip():
+            c["name"] = name.strip()[:60]
+        vp = (payload or {}).get("viewport")
+        if isinstance(vp, dict):
+            try:
+                c["viewport"] = {k: float(vp[k]) for k in ("x", "y", "zoom")}
+            except (KeyError, TypeError, ValueError):
+                pass
+        persist()
+    return state_payload()
+
+
+@app.delete("/api/canvases/{cid}")
+def api_delete_canvas(cid: str):
+    """删掉一个画布 —— 连它的图片池一起永久删除。最后一个画布不给删。"""
+    with LOCK:
+        d = doc()
+        if len(d["canvases"]) <= 1:
+            raise HTTPException(400, "至少要保留一个画布")
+        if not ws().delete_canvas(d, cid):
+            raise HTTPException(404, "画布不存在")
+        _focus(d)
+        persist()
+    return state_payload()
+
+
+# --------------------------------------------------------------------------
+# 剪贴板：跨画布复制 / 粘贴节点
+#
+# 剪贴板放在服务端内存里，而不是让浏览器揣着图片数据来回传 —— 粘贴时必须做一件
+# 浏览器做不了的事：把图片文件从**源画布**的池子复制一份进**目标画布**，并在目标
+# 画布重新分配短名（图片池是按画布分的，同名在不同画布是不同文件）。
+# --------------------------------------------------------------------------
+CLIP: dict = {"src": None, "resources": [], "processes": [], "edges": [], "anchor": (0.0, 0.0)}
+
+
+def _clip_empty() -> bool:
+    return not CLIP["resources"] and not CLIP["processes"]
+
+
+@app.post("/api/clipboard/copy")
+def api_clip_copy(payload: dict):
+    """把当前画布上选中的节点（+ 它们之间的连线）抄进剪贴板。"""
+    ids = [i for i in ((payload or {}).get("ids") or []) if isinstance(i, str)]
+    if not ids:
+        raise HTTPException(400, "没有选中任何节点")
+    with LOCK:
+        g = graph()
+        idset = set(ids)
+        resources = [json.loads(json.dumps(r)) for r in g["resources"] if r["id"] in idset]
+        processes = [json.loads(json.dumps(p)) for p in g["processes"] if p["id"] in idset]
+        if not resources and not processes:
+            raise HTTPException(400, "选中的节点不在当前画布上")
+        edges = [
+            json.loads(json.dumps(e))
+            for e in g["edges"]
+            if e["from"] in idset and e["to"] in idset
+        ]
+        nodes = resources + processes
+        CLIP.update({
+            "src": canvas()["id"],
+            "srcName": canvas()["name"],
+            "resources": resources,
+            "processes": processes,
+            "edges": edges,
+            "anchor": (
+                min(float(n.get("x", 0)) for n in nodes),
+                min(float(n.get("y", 0)) for n in nodes),
+            ),
+        })
+    return {"ok": True, "nodes": len(nodes), "edges": len(edges)}
+
+
+@app.post("/api/clipboard/paste")
+def api_clip_paste(payload: dict):
+    """把剪贴板里的节点重建到**当前画布**。
+
+    - 数据节点：图片文件从源画布**复制**一份过来，短名在目标画布重新分配
+    - 连线：只保留两端都被复制了的那些，端口不变
+    - 位置：整体平移到粘贴点（不传 x/y 就相对原位挪 40px），最终由吸附/落盘收口
+    - 「谁产出了谁」：生产者也一起粘过来的输出图才认领它的槽位；否则退化成
+      一张普通的输入图（不然会留下一个指向不存在处理节点的 producer）
+    """
+    if _clip_empty():
+        raise HTTPException(400, "剪贴板是空的")
+    with LOCK:
+        d = doc()
+        dst = canvas()
+        src_id = CLIP["src"]
+        if not any(c["id"] == src_id for c in d["canvases"]):
+            raise HTTPException(400, "剪贴板里的节点来自另一个工作目录，粘不过来")
+        v_src = ws().view(src_id)
+        v_dst = view()
+
+        ax, ay = CLIP["anchor"]
+        px, py = (payload or {}).get("x"), (payload or {}).get("y")
+        dx = (float(px) - ax) if px is not None else 40.0
+        dy = (float(py) - ay) if py is not None else 40.0
+
+        idmap: dict[str, str] = {}
+        # ---- 数据节点：连图片文件一起搬 ----
+        created: list[tuple[dict, dict]] = []
+        missing: list[str] = []
+        for src_r in CLIP["resources"]:
+            nid = new_id("r")
+            idmap[src_r["id"]] = nid
+            # 边分配边 append：alloc_name 是靠画布上的名字判重的，
+            # 不先落进列表里，下一次分配会拿到同一个名字
+            name = v_dst.alloc_name(dst)
+            node = {
+                "id": nid,
+                "name": name,
+                "kind": src_r.get("kind", "input"),
+                "x": float(src_r.get("x", 0)) + dx,
+                "y": float(src_r.get("y", 0)) + dy,
+            }
+            for k in ("w", "h"):
+                if src_r.get(k) is not None:
+                    node[k] = float(src_r[k])
+            dst["resources"].append(node)
+            created.append((src_r, node))
+            if src_r.get("name") and not v_src.copy_image_from(src_r["name"], v_dst, name):
+                missing.append(src_r["name"])
+
+        for src_r, node in created:
+            prod = src_r.get("producer")
+            if prod and prod in idmap:
+                node["producer"] = idmap[prod]
+                node["index"] = src_r.get("index", 0)
+            else:
+                node.pop("producer", None)
+                node["kind"] = "input"
+
+        # ---- 处理节点：参数/端口照抄，运行状态清零 ----
+        for src_p in CLIP["processes"]:
+            nid = new_id("p")
+            idmap[src_p["id"]] = nid
+            node = {
+                "id": nid,
+                "defId": src_p["defId"],
+                "x": float(src_p.get("x", 0)) + dx,
+                "y": float(src_p.get("y", 0)) + dy,
+                "params": json.loads(json.dumps(src_p.get("params") or {})),
+                "ports": dict(src_p.get("ports") or {}),
+                "status": "idle",
+                "dirty": False,
+                "error": None,
+                "lastRun": None,
+            }
+            for k in ("w", "h"):
+                if src_p.get(k) is not None:
+                    node[k] = float(src_p[k])
+            dst["processes"].append(node)
+
+        # ---- 连线：两端都在剪贴板里才重建 ----
+        for e in CLIP["edges"]:
+            if e["from"] in idmap and e["to"] in idmap:
+                dst["edges"].append({
+                    "id": new_id("e"),
+                    "from": idmap[e["from"]],
+                    "to": idmap[e["to"]],
+                    "port": e["port"],
+                })
+
+        persist()
+        out = state_payload()
+    schedule_purge()
+    out["paste"] = {
+        "nodes": len(created) + len(CLIP["processes"]),
+        "missing": missing,     # 源文件不在的（理论上有 hasImage 就不会发生）
+        "from": CLIP.get("srcName"),
+    }
+    return out
 
 
 @app.patch("/api/settings")
@@ -463,10 +736,10 @@ def api_pick_workspace():
 
 @app.post("/api/workspace/export")
 def api_export(payload: dict):
-    """把工作目录里的图片复制到用户指定的位置（UI 上叫「下载」）。"""
+    """把当前画布里的一张图复制到用户指定的位置（UI 上叫「下载」）。"""
     name = (payload or {}).get("name", "")
     w = ws()
-    src = w.image_path(name)
+    src = view().image_path(name)
     if src is None:
         raise HTTPException(404, f"图片不存在: {name}")
     try:
@@ -481,10 +754,22 @@ def api_export(payload: dict):
 
 # --------------------------------------------------------------------------
 # 图片
+#
+# 图片池是按画布分的，所以**取图必须带画布 id**：两个画布各有一个 A 是完全正常的，
+# 少了这个 id 就会把别的画布的 A 送出去。前端一律用带 id 的那条路由。
 # --------------------------------------------------------------------------
+@app.get("/api/images/{cid}/{name}")
+def api_image_in_canvas(cid: str, name: str):
+    p = ws().image_path(cid, name)
+    if p is None:
+        raise HTTPException(404, "图片不存在")
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/api/images/{name}")
 def api_image(name: str):
-    p = ws().image_path(name)
+    """不带画布 id 的兜底：在当前画布里找（老前端 / 手工点链接用）。"""
+    p = view().image_path(name)
     if p is None:
         raise HTTPException(404, "图片不存在")
     return FileResponse(p, headers={"Cache-Control": "no-cache"})
@@ -500,11 +785,11 @@ async def api_import_resource(
     x: float = Form(0),
     y: float = Form(0),
 ):
-    """从外部拖入 / 选择图片 → 复制一份到工作目录，成为数据节点。
+    """从外部拖入 / 选择图片 → 复制一份到**当前画布的图片池**，成为数据节点。
 
     若给了 resource_id，则表示「替换某个输入图的图片」（见 DESIGN.md §2.2.2 C8）。
     """
-    w = ws()
+    v = view()
     ext = Path(file.filename or "img.png").suffix.lower()
     if ext not in IMAGE_EXTS:
         ext = ".png"
@@ -515,18 +800,18 @@ async def api_import_resource(
             r = next((r for r in g["resources"] if r["id"] == resource_id), None)
             if r is None:
                 raise HTTPException(404, "数据节点不存在")
-            w.delete_image(r["name"])
+            v.delete_image(r["name"])
         else:
             r = {
                 "id": new_id("r"),
-                "name": w.alloc_name(g),
+                "name": v.alloc_name(g),
                 "kind": "input",
                 "x": x,
                 "y": y,
             }
             g["resources"].append(r)
 
-        dest = w.images_dir / f"{r['name']}{ext}"
+        dest = v.image_dir(create=True) / f"{r['name']}{ext}"
         with dest.open("wb") as fh:
             while chunk := await file.read(1 << 20):
                 fh.write(chunk)
@@ -547,8 +832,9 @@ async def api_import_resource(
 def api_delete_node(node_id: str):
     with LOCK:
         g = graph()
-        engine_mod.remove_process(g, node_id, ws())
-        engine_mod.remove_resource_node(g, node_id, ws())
+        v = view()
+        engine_mod.remove_process(g, node_id, v)
+        engine_mod.remove_resource_node(g, node_id, v)
         persist()
     schedule_purge()
     return state_payload()
@@ -674,12 +960,12 @@ def api_polish(pid: str):
         m = STATE["registry"].get(p.get("defId")) or {}
         specs = registry_mod.port_specs(m, p)
         inputs_map = engine_mod.connected_inputs(g, specs, pid)
-        w = ws()
+        v = view()
         image_paths: list[str] = []
         for port in specs:
             rid = inputs_map.get(port["key"])
             res = engine_mod._resource(g, rid) if rid else None  # noqa: SLF001
-            path = w.image_path(res["name"]) if res else None
+            path = v.image_path(res["name"]) if res else None
             if path is not None:
                 image_paths.append(str(path))
         params = p.get("params") or {}
@@ -729,12 +1015,12 @@ def api_detect_regions(pid: str):
             raise HTTPException(400, "这个节点没有配置「自动识别」")
         specs = registry_mod.port_specs(m, p)
         inputs_map = engine_mod.connected_inputs(g, specs, pid)
-        w = ws()
+        v = view()
         image_path: str | None = None
         for port in specs:
             rid = inputs_map.get(port["key"])
             res = engine_mod._resource(g, rid) if rid else None  # noqa: SLF001
-            path = w.image_path(res["name"]) if res else None
+            path = v.image_path(res["name"]) if res else None
             if path is not None:
                 image_path = str(path)
                 break
@@ -762,7 +1048,7 @@ def api_detect_regions(pid: str):
         raise HTTPException(502, str(e)) from e
 
     # ---- 按模型挑的参数跑一遍几何切分 ----
-    run_dir = w.tmp_dir / f"detect_{uuid.uuid4().hex[:8]}"
+    run_dir = v.tmp_dir / f"detect_{uuid.uuid4().hex[:8]}"
     run_dir.mkdir(parents=True, exist_ok=True)
     cli = [sys.executable, str(script), image_path, "--outdir", str(run_dir), "--debug"]
     for k, v in args.items():
@@ -935,6 +1221,8 @@ def api_execute(pid: str):
             raise HTTPException(404, "处理节点不存在")
         p["status"] = "running"
         p["error"] = None
+        # 先把画布钉住：执行期间图片要写进**这个画布**的池子，即便中途切了画布也不跑偏
+        v = view()
         persist()
     st = RUNS.create(pid)
 
@@ -943,7 +1231,7 @@ def api_execute(pid: str):
         try:
             with LOCK:
                 ok, err = engine_mod.execute(
-                    ws(), STATE["graph"], STATE["registry"], pid, st, STATE["settings"]
+                    v, STATE["graph"], STATE["registry"], pid, st, STATE["settings"]
                 )
                 persist()
         except Exception as e:  # noqa: BLE001

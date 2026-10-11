@@ -665,3 +665,16 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   background: var(--accent);
   border-color: #9cc8fb;
 }
+
+/* ---------------- 顶栏的画布选择器 ---------------- */
+.canvas-pick { display: flex; align-items: center; gap: 4px; }
+.canvas-pick > span { color: var(--muted); font-size: 11.5px; }
+.canvas-pick select {
+  font: inherit; font-size: 12px; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 6px; max-width: 190px;
+  cursor: pointer;
+}
+.canvas-pick select:hover:not(:disabled) { border-color: #4a5563; }
+.canvas-pick select:focus { border-color: var(--accent); outline: none; }
+.canvas-pick .icon-btn { padding: 4px 7px; font-size: 12px; }

@@ -96,7 +96,7 @@ function buildNodes(state, cbs) {
       // 注意数据节点里 data.width/height 是「图片像素分辨率」，别搞混。
       width: Math.max(rmin.w, r.w ?? RESOURCE_SIZE.w),
       height: Math.max(rmin.h, r.h ?? RESOURCE_SIZE.h),
-      data: { ...r, minW: rmin.w, minH: rmin.h, ...cbs },
+      data: { ...r, canvasId: state.canvasId, minW: rmin.w, minH: rmin.h, ...cbs },
     })),
     ...state.graph.processes.map((p) => {
       const sz = state.manifests?.[p.defId]?.size || {}
@@ -110,6 +110,7 @@ function buildNodes(state, cbs) {
         height: Math.max(pmin.h, p.h ?? sz.defaultHeight ?? PROCESS_SIZE.h),
         data: {
           ...p,
+          canvasId: state.canvasId,
           manifest: state.manifests?.[p.defId],
           inputs: portMap[p.id] || {},
           minW: pmin.w,
@@ -182,26 +183,155 @@ export default function App() {
   const stateRef = useRef(null)
   const selectionRef = useRef({ nodes: [], edges: [] })
 
-  const { screenToFlowPosition, fitView, getZoom } = useReactFlow()
+  const { screenToFlowPosition, fitView, getZoom, getViewport, setViewport } = useReactFlow()
 
   const flash = useCallback((msg) => {
     setToast(String(msg))
     setTimeout(() => setToast(null), 6000)
   }, [])
 
+  /* 画布切换的收尾：恢复目标画布记过的视野。
+     只在**画布真的变了**的时候做 —— 否则每次落盘回来的状态都会把用户刚做的
+     平移缩放拽回去。 */
+  const viewedCanvasRef = useRef(null)
+
+  const applyViewport = useCallback(
+    (s) => {
+      const vp = (s.canvases || []).find((c) => c.id === s.canvasId)?.viewport
+      if (vp && Number.isFinite(vp.zoom) && vp.zoom > 0) {
+        fitted.current = true // 有记过的视野，就别再自动「适应窗口」
+        setViewport({ x: vp.x, y: vp.y, zoom: vp.zoom }, { duration: 0 })
+        return true
+      }
+      fitted.current = false
+      return false
+    },
+    [setViewport],
+  )
+
   const applyState = useCallback(
     (s) => {
       if (!s || s.cancelled) return
+      const switched = viewedCanvasRef.current !== s.canvasId
+      viewedCanvasRef.current = s.canvasId
       setState(s)
       setNodes(buildNodes(s, cbsRef.current))
       setEdges(buildEdges(s))
+      if (switched && applyViewport(s)) return
       if (!fitted.current && (s.graph?.resources?.length || s.graph?.processes?.length)) {
         fitted.current = true
         setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 60)
       }
     },
-    [setNodes, setEdges, fitView],
+    [setNodes, setEdges, fitView, applyViewport],
   )
+
+  /* ---------------- 画布：切换 / 新建 / 改名 / 删除 ----------------
+     切走之前先把当前视野记到**将要离开的那个画布**上，切过去再恢复新画布的
+     视野 —— 每个画布各记各的，切回来还在原来的位置。 */
+  const rememberViewport = useCallback(async () => {
+    const cid = viewedCanvasRef.current
+    if (!cid) return
+    try {
+      await api.updateCanvas(cid, { viewport: getViewport() })
+    } catch {
+      /* 记不住就算了：视野丢了不影响数据 */
+    }
+  }, [getViewport])
+
+  const switchCanvas = useCallback(
+    async (cid) => {
+      if (!cid || cid === viewedCanvasRef.current) return
+      setMenu(null)
+      await rememberViewport()
+      try {
+        applyState(await api.openCanvas(cid))
+      } catch (e) {
+        flash(e.message)
+      }
+    },
+    [applyState, flash, rememberViewport],
+  )
+
+  const newCanvas = useCallback(async () => {
+    await rememberViewport()
+    try {
+      applyState(await api.createCanvas())
+    } catch (e) {
+      flash(e.message)
+    }
+  }, [applyState, flash, rememberViewport])
+
+  const [renameDraft, setRenameDraft] = useState(null)
+
+  const commitRename = useCallback(async () => {
+    const v = (renameDraft || '').trim()
+    setRenameDraft(null)
+    const cur = (stateRef.current?.canvases || []).find((c) => c.id === stateRef.current?.canvasId)
+    if (!v || !cur || v === cur.name) return
+    try {
+      applyState(await api.updateCanvas(cur.id, { name: v }))
+    } catch (e) {
+      flash(e.message)
+    }
+  }, [applyState, flash, renameDraft])
+
+  const removeCanvas = useCallback(async () => {
+    const s = stateRef.current
+    const cur = (s?.canvases || []).find((c) => c.id === s?.canvasId)
+    if (!cur) return
+    if ((s.canvases || []).length <= 1) return flash('至少要保留一个画布')
+    const ok = window.confirm(
+      `删除画布「${cur.name}」？\n` +
+        `· 它里面的 ${cur.nodeCount} 个节点会一起消失\n` +
+        '· 它自己的图片池会被永久删除（每个画布一份，别的画布不受影响）',
+    )
+    if (!ok) return
+    try {
+      applyState(await api.deleteCanvas(cur.id))
+    } catch (e) {
+      flash(e.message)
+    }
+  }, [applyState, flash])
+
+  /* ---------------- 跨画布复制 / 粘贴节点 ----------------
+     剪贴板放在服务端：粘贴时它得把图片文件从源画布的池子**复制**一份进目标画布，
+     并在目标画布重新分配短名（图片池是按画布分的，同名在不同画布是不同文件）。 */
+  const copySelection = useCallback(async () => {
+    const ids = (selectionRef.current?.nodes || []).map((n) => n.id)
+    if (!ids.length) return flash('先选中要复制的节点')
+    try {
+      const r = await api.copyNodes(ids)
+      flash(`已复制 ${r.nodes} 个节点${r.edges ? ` 和 ${r.edges} 条连线` : ''}，切到别的画布粘贴即可`)
+    } catch (e) {
+      flash(e.message)
+    }
+  }, [flash])
+
+  const pasteClipboard = useCallback(
+    async (at) => {
+      try {
+        const s = await api.pasteNodes(at)
+        applyState(s)
+        const missing = s.paste?.missing || []
+        flash(
+          missing.length
+            ? `已粘贴 ${s.paste.nodes} 个节点，但有 ${missing.length} 张图片文件没找到`
+            : `已粘贴 ${s.paste?.nodes || 0} 个节点`,
+        )
+      } catch (e) {
+        flash(e.message)
+      }
+    },
+    [applyState, flash],
+  )
+
+  /* Ctrl+V 粘到**视野中心** —— 跨画布粘贴时原来的坐标很可能在新画布视野之外 */
+  const pasteAtCenter = useCallback(() => {
+    const r = canvasRef.current?.getBoundingClientRect()
+    if (!r) return pasteClipboard()
+    return pasteClipboard(screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))
+  }, [pasteClipboard, screenToFlowPosition])
 
   /* ---------------- 删除（按键与按钮共用同一条路径）---------------- */
   const deleteSelection = useCallback(
@@ -726,6 +856,18 @@ export default function App() {
         setEditing(null)
         return
       }
+      // Ctrl+C / Ctrl+V：复制 / 粘贴节点（跨画布也用这一套）
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        const k = e.key.toLowerCase()
+        if (k !== 'c' && k !== 'v') return
+        const t0 = e.target
+        const tg0 = t0 && t0.tagName ? t0.tagName.toLowerCase() : ''
+        if (tg0 === 'input' || tg0 === 'textarea' || tg0 === 'select' || (t0 && t0.isContentEditable)) return
+        e.preventDefault()
+        if (k === 'c') copySelection()
+        else pasteAtCenter()
+        return
+      }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       // 有弹层开着时不吃删除键（否则会把画布上选中的节点删掉）
       if (document.querySelector('.viewer-mask, .editor-mask, .modal-mask')) return
@@ -740,7 +882,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [deleteSelection])
+  }, [deleteSelection, copySelection, pasteAtCenter])
 
   const manifests = useMemo(
     () => Object.values(state?.manifests || {}).sort((a, b) => a.id.localeCompare(b.id)),
@@ -771,6 +913,45 @@ export default function App() {
         <button onClick={() => { setWsInput(state?.workspace || ''); setWsErr(''); setShowWs(true) }}>
           工作目录
         </button>
+
+        <div className="canvas-pick">
+          <span>画布</span>
+          <select
+            value={state?.canvasId || ''}
+            onChange={(e) => switchCanvas(e.target.value)}
+            disabled={!state?.workspace}
+            title="切换画布（每个画布有自己的节点、连线与图片池）"
+          >
+            {(state?.canvases || []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}{c.nodeCount ? `（${c.nodeCount}）` : ''}
+              </option>
+            ))}
+          </select>
+          <button className="icon-btn" title="新建一个画布" onClick={newCanvas} disabled={!state?.workspace}>
+            ＋
+          </button>
+          <button
+            className="icon-btn"
+            title="重命名当前画布"
+            disabled={!state?.workspace}
+            onClick={() =>
+              setRenameDraft(
+                (state?.canvases || []).find((c) => c.id === state?.canvasId)?.name || '',
+              )
+            }
+          >
+            改名
+          </button>
+          <button
+            className="icon-btn"
+            title="删除当前画布（连它的图片池一起）"
+            onClick={removeCanvas}
+            disabled={!state?.workspace || (state?.canvases || []).length <= 1}
+          >
+            删除
+          </button>
+        </div>
 
         <div className="spacer" />
 
@@ -989,6 +1170,28 @@ export default function App() {
 
             <div className="ctx-sep" />
 
+            <div className="ctx-title">节点</div>
+            <button
+              className="ctx-item"
+              onClick={() => {
+                copySelection()
+                setMenu(null)
+              }}
+            >
+              复制选中的节点
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => {
+                pasteClipboard({ x: menu.flowX, y: menu.flowY })
+                setMenu(null)
+              }}
+            >
+              粘贴到此处
+            </button>
+
+            <div className="ctx-sep" />
+
             <div className="ctx-title">画布</div>
             <button
               className="ctx-item"
@@ -1026,6 +1229,32 @@ export default function App() {
       {busy ? (
         <div className="modal-mask" style={{ background: 'rgba(8,10,14,.35)' }}>
           <div style={{ color: 'var(--muted)' }}>处理中…</div>
+        </div>
+      ) : null}
+
+      {renameDraft !== null ? (
+        <div className="modal-mask">
+          <div className="modal">
+            <h3>重命名画布</h3>
+            <p>画布名只是显示用的，不影响图片与文件。</p>
+            <input
+              type="text"
+              autoFocus
+              value={renameDraft}
+              placeholder="画布名"
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') setRenameDraft(null)
+              }}
+            />
+            <div className="modal-foot">
+              <button className="primary" onClick={commitRename} disabled={!renameDraft.trim()}>
+                确定
+              </button>
+              <button onClick={() => setRenameDraft(null)}>取消</button>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1109,7 +1338,7 @@ export default function App() {
           <div className={`viewer-stage ${viewerFit ? 'fit' : 'actual'}`} ref={viewerStageRef}>
             <img
               ref={viewerImgRef}
-              src={api.imageUrl(viewer.name, viewer.mtime)}
+              src={api.imageUrl(state?.canvasId, viewer.name, viewer.mtime)}
               alt={viewer.name}
               draggable={false}
               title="滚轮缩放 · 中键拖动平移 · 双击切换「适应窗口 / 实际大小」"

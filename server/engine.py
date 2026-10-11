@@ -21,7 +21,7 @@ import time
 import uuid
 from pathlib import Path
 
-from workspace import IMAGE_EXTS, Workspace, drop_tree
+from workspace import IMAGE_EXTS, CanvasView, drop_tree
 import registry as registry_mod
 
 RUN_TIMEOUT_SEC = 900
@@ -271,7 +271,7 @@ def _remove_resource(graph: dict, rid: str) -> None:
     graph["edges"] = [e for e in graph["edges"] if e["from"] != rid and e["to"] != rid]
 
 
-def remove_process(graph: dict, pid: str, ws: Workspace) -> None:
+def remove_process(graph: dict, pid: str, ws: CanvasView) -> None:
     """删除处理节点：连带删除它的输出数据节点、文件、以及所有相关连线。"""
     for r in [r for r in graph["resources"] if r.get("producer") == pid]:
         ws.delete_image(r["name"])
@@ -280,7 +280,7 @@ def remove_process(graph: dict, pid: str, ws: Workspace) -> None:
     graph["edges"] = [e for e in graph["edges"] if e["from"] != pid and e["to"] != pid]
 
 
-def remove_resource_node(graph: dict, rid: str, ws: Workspace) -> None:
+def remove_resource_node(graph: dict, rid: str, ws: CanvasView) -> None:
     r = _resource(graph, rid)
     if r is None:
         return
@@ -292,7 +292,7 @@ def remove_resource_node(graph: dict, rid: str, ws: Workspace) -> None:
 # 主流程
 # --------------------------------------------------------------------------
 def execute(
-    ws: Workspace,
+    ws: CanvasView,
     graph: dict,
     registry: dict[str, dict],
     pid: str,
@@ -473,7 +473,7 @@ def execute(
             _as_float(r.get("y"), cursor_y) + resource_height(r, settings) + SLOT_GAP_Y,
             grid_size(settings),
         )
-        dest = ws.images_dir / f"{r['name']}{src.suffix.lower()}"
+        dest = ws.image_dir(create=True) / f"{r['name']}{src.suffix.lower()}"
         shutil.move(str(src), str(dest))
 
     drop_tree(run_dir)

@@ -261,7 +261,7 @@ export default function RegionEditor({ image, regions, onSave, onClose }) {
               style={shot ? { width: dispW, height: dispH } : { width: 0, height: 0 }}
               onMouseDown={(e) => startDrag(e, 'create', -1)}
             >
-              <img src={imageUrl(image?.name, image?.mtime)} alt={image?.name} draggable={false} />
+              <img src={imageUrl(image?.canvasId, image?.name, image?.mtime)} alt={image?.name} draggable={false} />
               {shot
                 ? list.map((r, i) =>
                     r.hidden ? null : (

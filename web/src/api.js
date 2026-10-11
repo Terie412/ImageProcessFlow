@@ -30,6 +30,16 @@ export const getState = () => fetch('/api/state').then(J)
 export const reloadRegistry = () => post('/api/registry/reload')
 export const updateSettings = (payload) => patch('/api/settings', payload)
 
+/* 画布：一个工作目录里可以有多个，切换/新建/改名/删除都返回整包状态 */
+export const createCanvas = (name) => post('/api/canvases', { name })
+export const openCanvas = (id) => post(`/api/canvases/${id}/open`)
+export const updateCanvas = (id, payload) => patch(`/api/canvases/${id}`, payload)
+export const deleteCanvas = (id) => fetch(`/api/canvases/${id}`, { method: 'DELETE' }).then(J)
+
+/* 跨画布复制/粘贴：剪贴板在服务端，粘贴时顺手把图片文件复制进目标画布 */
+export const copyNodes = (ids) => post('/api/clipboard/copy', { ids })
+export const pasteNodes = (at) => post('/api/clipboard/paste', at || {})
+
 export const setWorkspace = (path) => post('/api/workspace', { path })
 export const pickWorkspace = () => post('/api/workspace/pick')
 export const exportImage = (name) => post('/api/workspace/export', { name })
@@ -60,5 +70,7 @@ export const importImage = async (file, { resourceId = '', x = 0, y = 0 } = {}) 
   return fetch('/api/resources/import', { method: 'POST', body: fd }).then(J)
 }
 
-export const imageUrl = (name, mtime) =>
-  `/api/images/${encodeURIComponent(name)}?v=${mtime || 0}`
+/* 图片池是按画布分的，所以取图**必须带画布 id** ——
+   两个画布各有一个 A 是完全正常的，少了 id 会把别的画布的 A 拿过来 */
+export const imageUrl = (canvasId, name, mtime) =>
+  `/api/images/${encodeURIComponent(canvasId || '')}/${encodeURIComponent(name)}?v=${mtime || 0}`

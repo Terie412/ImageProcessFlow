@@ -39,6 +39,7 @@ export default function ProcessNode({ id, data, selected }) {
     dirty,
     error,
     inputs = {},
+    canvasId,
     lastDuration,
     onParam,
     onExecute,
@@ -163,7 +164,7 @@ export default function ProcessNode({ id, data, selected }) {
   }
 
   const openEditor = () => {
-    if (primary && inputRes) onEditRegions(id, { image: inputRes, regions })
+    if (primary && inputRes) onEditRegions(id, { image: { ...inputRes, canvasId }, regions })
   }
 
   if (!manifest) return <div className="node">未注册的脚本</div>
@@ -250,7 +251,7 @@ export default function ProcessNode({ id, data, selected }) {
                     style={shot ? { width: shot.w, height: shot.h } : { width: 0, height: 0 }}
                   >
                     <img
-                      src={imageUrl(inputRes.name, inputRes.mtime)}
+                      src={imageUrl(canvasId, inputRes.name, inputRes.mtime)}
                       alt={inputRes.name}
                       draggable={false}
                     />

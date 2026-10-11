@@ -4,7 +4,7 @@ import { imageUrl } from './api'
 
 export default function ResourceNode({ id, data, selected }) {
   const {
-    name, kind, hasImage, mtime, index, width, height, format, onReplace, onExport,
+    name, kind, hasImage, mtime, index, width, height, format, canvasId, onReplace, onExport,
     minW = 200, minH = 180, onResizeStart,
   } = data
 
@@ -25,7 +25,7 @@ export default function ResourceNode({ id, data, selected }) {
 
       <div className="thumb">
         {hasImage ? (
-          <img src={imageUrl(name, mtime)} alt={name} draggable={false} />
+          <img src={imageUrl(canvasId, name, mtime)} alt={name} draggable={false} />
         ) : (
           <div className="ph">（无图片）</div>
         )}
