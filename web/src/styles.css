@@ -11,6 +11,13 @@
   --warn: #e0a336;
   --err: #ef5f5f;
   --dirty: #b47cf0;
+
+  /* 节点内部的纵向基线。连线端点要跟「左栏第一个输入口」同高，
+     位置就由这三个值算出来（见 .react-flow__handle 那条），别再手写魔数。
+     标题栏 35 = 上内边距 7 + 徽标高 20 + 下内边距 7 + 底边框 1 */
+  --head-h: 35px;
+  --ports-pad-top: 6px;
+  --port-row-h: 21px;
 }
 
 * { box-sizing: border-box; }
@@ -221,6 +228,9 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .port-row {
   display: flex; align-items: center; gap: 5px;
   padding: 2px 6px 2px 8px;
+  min-height: var(--port-row-h);   /* 固定行高：没有减号/标签的口（如裁剪节点那个无名口）
+                                      也占同样高度 —— 否则「第一个口」的基线会跟别的节点
+                                      差 3.5px，右侧端点就没法跟它对齐 */
   color: var(--muted); font-size: 10.5px;
 }
 /* 数字居中：左边圈圈、右边减号，一栏里就这三样 */
@@ -621,11 +631,23 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 
 /* React Flow handle 微调 */
 .react-flow__handle {
-  width: 9px; height: 9px; background: #46536b; border: 1px solid #6d7c96;
+  /* 10px 与左栏输入口那个圈一致（见 .port-row .react-flow__handle）——
+     两边不一样大时，圆心会因为半个像素的取整差出 0.3px，放大后能看出来 */
+  width: 10px; height: 10px; background: #46536b; border: 1px solid #6d7c96;
 }
 .react-flow__handle.connectionindicator:hover { background: var(--accent); }
 .react-flow__handle-left { left: -5px; }
 .react-flow__handle-right { right: -5px; }
+
+/* 节点两侧的连线端点一律钉在**标题栏正下方**，与左栏第一个输入口同高。
+   React Flow 默认给的是 top:50%（垂直居中），端点就落在节点腰部 —— 线会斜着
+   钻进左栏顶部那一列输入口，视觉上对不齐。
+   位置 = 标题栏 + 左栏上内边距 + 半个输入口行高（三个值定义在 :root 里）。
+   只命中**直属 .node 的**端点；左栏里的端口是 position:static（见上面 .port-row
+   那条覆盖），走行内布局 —— 它们本身就是这个基准，不用动。 */
+.react-flow__node .node > .react-flow__handle {
+  top: calc(var(--head-h) + var(--ports-pad-top) + var(--port-row-h) / 2);
+}
 .react-flow__edge-path { stroke-width: 1.5; }
 
 /* ---------------- 节点缩放手柄（右下角一个小方块） ---------------- */
