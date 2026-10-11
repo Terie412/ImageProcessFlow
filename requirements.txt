@@ -1,0 +1,13 @@
+# ImageProcessFlow 后端依赖
+#
+# 安装（venv 必须建在 runtime\venv，start.bat 写死了这个路径）：
+#   python -m venv runtime\venv
+#   runtime\venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# 国内加速可加：-i https://pypi.tuna.tsinghua.edu.cn/simple
+# 避免污染 C 盘 pip 缓存：--cache-dir runtime\pip-cache
+
+fastapi==0.143.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+pillow==12.3.0

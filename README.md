@@ -44,6 +44,57 @@ start.bat -w D:\workspace\myproj   :: 直接指定工作目录
 
 ---
 
+## 从零开始（克隆后首次运行）
+
+克隆下来的仓库**只有源码** —— 依赖、构建产物、工作目录数据都被 `.gitignore` 排除了，所以第一次跑之前要先搭环境。三步：
+
+```bat
+:: 1) 后端依赖。venv 必须建在 runtime\venv（start.bat 写死了这个路径）
+python -m venv runtime\venv
+runtime\venv\Scripts\python.exe -m pip install -r requirements.txt
+
+:: 2) 前端构建。产物输出到 server\static —— 不构建的话界面打不开
+cd web && npm install && npm run build && cd ..
+
+:: 3) 起服务
+start.bat
+```
+
+然后浏览器打开 **http://127.0.0.1:8770**。
+
+### 环境要求
+
+| 项 | 要求 | 说明 |
+| --- | --- | --- |
+| Python | **3.10+**（实测 3.14.4） | 只跑后端。上面命令里的 `python` 换成你自己的解释器路径 |
+| Node.js | **18+**（实测 22.x） | **只在构建前端时需要**，跑起来之后用不到 |
+| `DASHSCOPE_API_KEY` | 环境变量 | 阿里云百炼的 key。不配则**生图节点执行失败**，其他功能不受影响 |
+| `DEEPSEEK_API_KEY` | 环境变量（可选） | 只有用「提示词润色 / 裁剪自动识别」才需要 |
+
+> 国内装依赖慢的话：pip 加 `-i https://pypi.tuna.tsinghua.edu.cn/simple`（`web/.npmrc` 里已经配好了 npmmirror）。
+> 不想让 pip 缓存落到 C 盘就再加 `--cache-dir runtime\pip-cache`。
+
+### ⚠️ 三个最容易卡住的地方
+
+1. **venv 路径不能改。** `start.bat` 里写死了 `runtime\venv\Scripts\python.exe`。想用别的解释器就别走 bat，直接跑
+   `python server\main.py -w <工作目录>`。
+2. **必须先 `npm run build`。** `server/static` 是 vite 的构建产物、不在仓库里。没有它服务照样起得来，但打开 8770 是 **404** —— 后端只在 `server/static` 存在时才挂载静态目录（`server/main.py` 里那句 `if STATIC_DIR.is_dir()`）。做前端开发时改用 `npm run dev`（见下方「开发」）。
+3. **`npm install` 可能漏装 optional 依赖。** 某些沙箱环境会往 Node 进程注入 `NODE_OPTIONS` 垫片，导致 `@rollup/rollup-win32-x64-msvc` / `@esbuild/win32-x64` 漏装，`vite build` 报 `Cannot find module @rollup/...`。补装命令见「开发」一节。
+
+> 首次启动**不会有 `settings.json`**，这是正常的 —— 程序会用默认值生成，它是本地偏好、已被 gitignore。
+
+### 装完验一下
+
+```bat
+:: 端到端：导入图片 → 建节点 → 连线 → 执行 → 校验产出
+:: ⚠️ 会真实调用 1 次生图，按张计费，需要 DASHSCOPE_API_KEY
+runtime\venv\Scripts\python.exe runtime\api_test.py
+```
+
+它会自己切到一个一次性临时工作目录跑、结束再切回来，不会动你的真实工作目录。全部测试脚本见「开发 → 测试脚本」。
+
+---
+
 ## 提示词润色
 
 提示词框**右侧**（贴着这一行的底部）有个 **「润色」** 按钮。点它会把 **当前提示词 + 这个节点连着的所有参考图 + 该生图模型的使用特点** 一起发给一个文本模型（DeepSeek），拿回改写后的提示词，**直接替换**框里的内容；替换后按钮上方会出现 **「撤销」**，点一下还原。润色后内容通常会长不少，可以用鼠标滚轮在框里翻。
@@ -213,7 +264,11 @@ cd web && npm run build
 runtime\venv\Scripts\python.exe server\main.py -w <工作目录>
 ```
 
-### 依赖位置（全部在 D 盘，不碰 C 盘）
+> 以上命令假定环境已搭好（venv + `server/static`）。**第一次克隆请先按上面的「从零开始」走一遍。**
+
+### 依赖位置
+
+下面这套是本项目开发时的参照环境，换成自己的路径也行 —— **只要 venv 落在 `runtime\venv`**（`start.bat` 依赖它）。
 
 | 项 | 位置 |
 | --- | --- |
