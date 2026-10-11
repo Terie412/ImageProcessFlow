@@ -53,6 +53,8 @@ DEFAULT_SETTINGS: dict = {
     "textModelKeyEnv": "DEEPSEEK_API_KEY",
     # 润色用的模型名（DeepSeek 里只有它支持图片输入）
     "textModelName": "deepseek-v4-flash-vision-exp",
+    # 上次打开过的工作目录：下次启动自动打开，省得每次都要重选一遍
+    "lastWorkspace": "",
     # 每种节点的最小尺寸（画布坐标），按**具体节点类型**分：
     #   resource              → 数据节点
     #   process:<defId>       → 某个具体的处理节点类型（如 process:qwen_image）
@@ -221,6 +223,20 @@ def graph() -> dict:
     return STATE["graph"]
 
 
+def _open_workspace(path: str | Path) -> Workspace:
+    """打开工作目录，并把它记进设置 —— 下次启动直接用这个路径。
+
+    工作目录只活在内存里，重启就没了；不记下来的话每次都得在界面上重选一遍。
+    """
+    w = Workspace(path)
+    w.ensure()
+    STATE["workspace"] = w
+    STATE["graph"] = _migrate(w.load())
+    STATE["settings"]["lastWorkspace"] = str(w.root)
+    save_settings(STATE["settings"])
+    return w
+
+
 def persist() -> None:
     ws().save(STATE["graph"])
 
@@ -361,10 +377,7 @@ def api_set_workspace(payload: dict):
     if not path:
         raise HTTPException(400, "路径为空")
     with LOCK:
-        w = Workspace(path)
-        w.ensure()
-        STATE["workspace"] = w
-        STATE["graph"] = _migrate(w.load())
+        _open_workspace(path)
     schedule_purge()
     return state_payload()
 
@@ -413,10 +426,7 @@ def api_pick_workspace():
     if not chosen:
         return {"cancelled": True}
     with LOCK:
-        w = Workspace(chosen)
-        w.ensure()
-        STATE["workspace"] = w
-        STATE["graph"] = _migrate(w.load())
+        _open_workspace(chosen)
     schedule_purge()
     return state_payload()
 
@@ -983,12 +993,13 @@ def main() -> None:
     reload_registry()
     print(f"[启动] 已注册脚本: {', '.join(STATE['registry']) or '（无）'}")
 
-    if args.workspace:
-        w = Workspace(args.workspace)
-        w.ensure()
-        STATE["workspace"] = w
-        STATE["graph"] = _migrate(w.load())
+    # 命令行给了就用给的；没给就自动打开「上次用过的」，省得每次回界面重选
+    boot_ws = args.workspace or (STATE["settings"].get("lastWorkspace") or "")
+    if boot_ws and Path(boot_ws).is_dir():
+        w = _open_workspace(boot_ws)
         print(f"[启动] 工作目录: {w.root}")
+    elif boot_ws:
+        print(f"[启动] 上次的工作目录已不存在，忽略: {boot_ws}")
 
     # 清理上次残留的临时目录
     if STATE["workspace"] is not None:
