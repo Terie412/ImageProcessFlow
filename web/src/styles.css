@@ -1,0 +1,645 @@
+:root {
+  color-scheme: dark;
+  --bg: #16181d;
+  --panel: #1e2127;
+  --panel-2: #262a32;
+  --line: #343a45;
+  --text: #e6e8ec;
+  --muted: #939aa8;
+  --accent: #4f9cf9;
+  --ok: #35c48b;
+  --warn: #e0a336;
+  --err: #ef5f5f;
+  --dirty: #b47cf0;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.6 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.app { display: flex; flex-direction: column; height: 100%; }
+
+/* ---------------- 顶栏 ---------------- */
+.toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.toolbar .brand { font-weight: 600; letter-spacing: .3px; margin-right: 6px; }
+.toolbar .brand span { color: var(--accent); }
+.toolbar .ws {
+  color: var(--muted); font-size: 12px;
+  max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px;
+}
+.toolbar .spacer { flex: 1; }
+.toolbar .icon-btn { padding: 4px 9px; font-size: 15px; line-height: 1.35; color: var(--muted); }
+.toolbar .icon-btn:hover:not(:disabled) { color: var(--text); }
+
+/* 设置浮层 */
+.settings-wrap { position: relative; }
+.settings-pop {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 45;
+  min-width: 286px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
+}
+.settings-pop .set-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; border-radius: 7px; cursor: pointer;
+  font-size: 12.5px; color: var(--text); white-space: nowrap;
+}
+.settings-pop .set-row:hover { background: var(--panel-2); }
+.settings-pop .set-row input { accent-color: var(--accent); margin: 0; }
+.settings-pop .set-sep { height: 1px; margin: 6px 4px; background: var(--line); }
+.settings-pop .set-group {
+  padding: 5px 9px 3px; color: var(--muted); font-size: 11px; letter-spacing: .3px;
+}
+.settings-pop .set-field { display: block; padding: 4px 9px 5px; }
+.settings-pop .set-field > span {
+  display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px;
+}
+.settings-pop .set-field input {
+  width: 100%; font: inherit; font-size: 11.5px; color: var(--text);
+  background: #12141a; border: 1px solid var(--line); border-radius: 5px;
+  padding: 4px 7px; outline: none;
+}
+.settings-pop .set-field input:focus { border-color: var(--accent); }
+/* 「节点最小尺寸」：两个数字框中间夹一个 × */
+.settings-pop .set-size { display: flex; align-items: center; gap: 6px; }
+.settings-pop .set-size input { width: 72px; padding: 4px 6px; }
+.settings-pop .set-x { color: var(--muted); font-size: 11px; }
+
+button {
+  font: inherit; color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 5px 11px; border-radius: 6px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: #4a5563; background: #2d323b; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #08121f; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: #66aefc; }
+button.tiny { padding: 2px 7px; font-size: 12px; }
+button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
+
+/* ---------------- 画布 ---------------- */
+.canvas { flex: 1 1 auto; position: relative; min-height: 0; }
+.react-flow__attribution { display: none; }
+
+.empty-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); pointer-events: none; text-align: center; line-height: 2;
+}
+
+/* 画布左上角：当前选中节点的基础数据（目前只有尺寸） */
+.sel-info {
+  position: absolute; left: 12px; top: 12px; z-index: 6;
+  display: flex; align-items: baseline; gap: 7px;
+  padding: 5px 11px;
+  background: rgba(30, 33, 39, .92);
+  border: 1px solid var(--line); border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+  font-size: 11px; color: var(--muted);
+  pointer-events: none;
+}
+.sel-info b {
+  color: var(--text); font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: .2px;
+}
+
+/* ---------------- 节点通用 ---------------- */
+.node {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  width: 100%; height: 100%;    /* 尺寸由 React Flow 节点的 width/height 控制，可拖右下角改 */
+  position: relative;
+  display: flex; flex-direction: column;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  font-size: 12px;
+}
+.node.selected { border-color: var(--accent); }
+
+/* 除了「输入口 + 右栏」这块以外，其余区块都按内容占位，不参与伸缩 */
+.node > .node-head { flex: 0 0 auto; }
+
+/* 左栏输入口 + 右栏（提示词/参数/执行） */
+.node-main { display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0; }
+.node-right { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.node-right > .cfg,
+.node-right > .err-box,
+.node-right > .node-foot { flex: 0 0 auto; }
+
+.node-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 10px 10px 0 0;
+  background: var(--panel-2);
+}
+.node-head .title { font-weight: 600; font-size: 12.5px; }
+.node-head .spacer { flex: 1; }
+
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 5px; font-weight: 700; font-size: 11px; letter-spacing: .5px;
+  background: #2f4a6d; color: #a9cdf7;
+}
+.badge.input { background: #2f4a6d; color: #a9cdf7; }
+.badge.output { background: #2d5f45; color: #9fe1cb; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.dot.idle { background: #5a6473; }
+.dot.dirty { background: var(--dirty); }
+.dot.running { background: var(--warn); animation: pulse 1s infinite; }
+.dot.done { background: var(--ok); }
+.dot.error { background: var(--err); }
+@keyframes pulse { 50% { opacity: .3; } }
+
+/* ---------------- 资源节点 ---------------- */
+.thumb {
+  margin: 8px; border-radius: 7px; overflow: hidden;
+  background: #12141a; border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 80px;
+  flex: 1 1 auto;               /* 撑满节点剩余高度，跟着节点尺寸走 */
+}
+.thumb img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.thumb .ph { color: #4d5563; padding: 24px 0; font-size: 11px; }
+
+.node-foot {
+  display: flex; align-items: center; gap: 6px;
+  /* 底部留出一条空带给右下角的缩放手柄，否则它会压在按钮上 */
+  padding: 10px 10px 18px 9px;
+}
+.node-foot button.primary { flex: 1 1 auto; }
+.node-foot button.tiny { flex: 0 0 auto; }
+
+/* 标题栏右侧的次要信息：耗时 / 分辨率 · 格式 */
+.node-head .title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.node-head .status,
+.node-head .dur,
+.node-head .meta-right {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.node-head .dur::before { content: '· '; color: #5a6270; }
+.node-head .meta-right { letter-spacing: .2px; }
+.node-foot button { flex: 1; }
+
+/* ---------------- 处理节点 ---------------- */
+.node-head .status { color: var(--muted); font-size: 11px; }
+
+/* 输入口：每个口一个圈圈作为连线终点。整栏竖排在节点左侧，独占一列、宽度写死 */
+.ports {
+  flex: 0 0 auto;
+  width: 70px;
+  display: flex; flex-direction: column;
+  padding: 6px 0 4px;
+  border-right: 1px solid var(--line);
+  overflow: auto;              /* 输入口很多时在栏内滚动，不撑破节点 */
+}
+.port-row {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 6px 2px 8px;
+  color: var(--muted); font-size: 10.5px;
+}
+/* 数字居中：左边圈圈、右边减号，一栏里就这三样 */
+.port-row .port-label {
+  flex: 1 1 auto; text-align: center;
+  font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.port-row.linked { color: var(--text); }
+/* 覆盖 React Flow 的绝对定位，让圈圈跟着自己那一行 */
+.port-row .react-flow__handle {
+  position: static;
+  transform: none;
+  margin: 0;
+  width: 10px; height: 10px;
+  background: #21262f;
+  border: 1.5px solid #7d8ca6;
+}
+.port-row.linked .react-flow__handle,
+.port-row .react-flow__handle:hover {
+  background: var(--accent);
+  border-color: #9cc8fb;
+}
+
+/* 每个输入口右侧的删除按钮：与「＋」同款按钮外观，hover 时转红提示是删除 */
+.port-row .row-del { flex: 0 0 auto; }
+.port-row .row-del:hover:not(:disabled) {
+  color: var(--err); border-color: rgba(239, 95, 95, .6); background: rgba(239, 95, 95, .1);
+}
+.port-row .row-del:disabled { opacity: .3; }
+
+/* 底部只留「＋」：新增一个输入口（紧跟在最后一个输入口下方，右对齐，与减号同列） */
+.port-ctl {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 2px 6px 0;
+}
+.pin-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; padding: 0;
+  font-size: 11px; line-height: 1; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+}
+.pin-btn:hover:not(:disabled) { color: var(--text); border-color: #4a5563; }
+
+/* 提示词：节点的主体（在右栏，左栏是输入口）。
+   框和「润色 / 撤销」左右并排，按钮贴在这一行的右下角 */
+.prompt-wrap {
+  flex: 1 1 auto; min-width: 0; min-height: 0;
+  display: flex; flex-direction: row; gap: 6px;
+  margin: 8px 10px 0 9px;
+}
+.prompt-box {
+  display: block;
+  flex: 1 1 auto; min-width: 0; min-height: 60px;   /* 撑满，跟着节点尺寸走 */
+  margin: 0;
+  padding: 12px 10px;
+  resize: none;
+  text-align: left;
+  /* 字号对齐端口标签「参考图1」（.port-row 的 11.5px），行距略放宽一点便于长提示词阅读 */
+  font: inherit; font-size: 11.5px; line-height: 1.75;
+  color: var(--text); background: #12141a;
+  border: 1px solid var(--line); border-radius: 8px;
+  outline: none;
+}
+.prompt-box::placeholder { color: #4d5563; }
+.prompt-box:focus { border-color: var(--accent); }
+
+/* 输入框右侧、贴着这一行底部的操作列（润色 / 撤销） */
+.prompt-actions {
+  flex: 0 0 auto; align-self: flex-end;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+}
+.mini-btn {
+  padding: 2px 9px;
+  font: inherit; font-size: 11px; line-height: 1.6;
+  color: var(--muted); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 5px;
+  white-space: nowrap;
+}
+.mini-btn:hover:not(:disabled) { color: var(--text); border-color: #4a5563; }
+.mini-btn:disabled { opacity: .55; }
+
+/* 次要配置：一行塞得下就横排，塞不下才折行 —— 节点够宽时整体只占一到两排 */
+.cfg {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px 10px; padding: 8px 10px 6px 9px;
+}
+.cfg-field { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 148px; }
+.cfg-field.grow { flex: 1 1 190px; }    /* 模型：名字最长，占掉整行剩余宽度 */
+.cfg-field.narrow { flex: 0 0 78px; }   /* 张数：定宽小格 */
+.cfg-field.full { flex: 1 1 100%; }
+.cfg-label { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.cfg-field select,
+.cfg-field input {
+  flex: 1 1 auto; min-width: 0;
+  padding: 4px 6px;
+  font: inherit; font-size: 11.5px; color: var(--text);
+  background: #12141a; border: 1px solid var(--line); border-radius: 5px;
+  outline: none;
+}
+.cfg-field select:focus,
+.cfg-field input:focus { border-color: var(--accent); }
+/* 开关组：整体作为一个可折行的单元，不会把某一项单独甩到下一行 */
+.cfg-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; flex: 0 1 auto; }
+.cfg-check { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.cfg-check input { accent-color: var(--accent); }
+
+.err-box {
+  margin: 6px 10px 0 9px; padding: 6px 8px; border-radius: 6px;
+  background: rgba(239,95,95,.12); border: 1px solid rgba(239,95,95,.4);
+  color: #ffb3b3; font-size: 11px; white-space: pre-wrap; max-height: 120px; overflow: auto;
+}
+
+/* ---------------- 日志抽屉 ---------------- */
+.drawer {
+  flex: 0 0 auto; height: 230px;
+  background: var(--panel); border-top: 1px solid var(--line);
+  display: flex; flex-direction: column;
+}
+.drawer-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.drawer-head .spacer { flex: 1; }
+.drawer-body {
+  flex: 1 1 auto; overflow: auto; margin: 0; padding: 8px 12px;
+  font: 12px/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap;
+  color: #c3cad6;
+}
+.drawer-body .l-err { color: #ff9b9b; }
+
+/* ---------------- 画布右键菜单 ---------------- */
+.ctx-menu {
+  position: absolute;
+  z-index: 40;
+  min-width: 176px;
+  max-width: 260px;
+  max-height: 70%;
+  overflow: auto;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
+}
+.ctx-title {
+  padding: 4px 8px 5px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .4px;
+}
+.ctx-empty { padding: 2px 8px 8px; color: #6c7480; font-size: 12px; }
+.ctx-item {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--panel-2); }
+.ctx-sep { height: 1px; margin: 6px 4px; background: var(--line); }
+
+/* ---------------- 遮罩 ---------------- */
+.modal-mask {
+  position: absolute; inset: 0; background: rgba(8,10,14,.72);
+  display: flex; align-items: center; justify-content: center; z-index: 20;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 20px 22px; width: 460px; box-shadow: 0 16px 48px rgba(0,0,0,.55);
+}
+.modal h3 { margin: 0 0 6px; font-size: 14px; }
+.modal p { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+.modal input[type="text"] {
+  width: 100%; font: inherit; color: var(--text); background: #12141a;
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; outline: none;
+}
+.modal input[type="text"]:focus { border-color: var(--accent); }
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.modal .err { color: var(--err); font-size: 12px; margin-top: 8px; }
+
+/* ---------------- 裁剪区域（处理节点的 regions 主体） ---------------- */
+.regions {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+  margin: 8px 10px 0 9px;
+}
+.region-shot {
+  flex: 1 1 auto; min-height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  background: #12141a; border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; cursor: zoom-in;
+}
+.region-shot .ph { color: #4d5563; font-size: 11.5px; }
+.region-canvas { position: relative; line-height: 0; }
+.region-canvas img { display: block; width: 100%; height: 100%; }
+.region-layer { position: absolute; inset: 0; }
+.region-box {
+  position: absolute; box-sizing: border-box;
+  border: 1.5px solid #ffcf5c; border-radius: 2px;
+  background: rgba(255, 207, 92, .12);
+}
+.region-box i {
+  position: absolute; left: 0; top: -13px;   /* 序号挪到框外面，别挡住要判断的区域 */
+  padding: 0 3px; font-size: 9px; font-style: normal; line-height: 12px;
+  color: #2a1c00; background: #ffcf5c; border-radius: 2px;
+  pointer-events: none;
+}
+/* 框紧贴图顶边时上方没空间了，缩回框内，免得被裁掉 */
+.region-box.tight i { top: 0; border-radius: 0 0 2px 0; }
+.region-bar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 0 5px;
+}
+.region-count { color: var(--muted); font-size: 11px; }
+.region-bar .spacer { flex: 1; }
+
+/* 输入口一栏没有可见标签时（例如裁剪节点那个无名单口）收窄成一条 */
+.ports.compact { width: auto; padding: 6px 4px 4px; }
+.ports.compact .port-row { padding: 2px 0; }
+
+/* ---------------- 裁剪区域编辑器 ---------------- */
+.editor-mask {
+  position: fixed; inset: 0; z-index: 62;
+  background: rgba(6, 8, 11, .88);
+  display: flex; align-items: center; justify-content: center;
+}
+.editor {
+  width: min(1180px, 94vw); height: min(780px, 90vh);
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .6);
+}
+.editor-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 14px; border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.editor-head .spacer { flex: 1; }
+.editor-meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.editor-hint { color: #6c7480; font-size: 11.5px; }
+.editor-body { flex: 1 1 auto; min-height: 0; display: flex; }
+.editor-stage {
+  flex: 1 1 auto; min-width: 0;
+  display: flex;                       /* 居中交给子元素的 margin:auto —— 缩放后不会被裁掉 */
+  background: #0f1116; overflow: auto; padding: 14px;
+}
+/* 中键拖动平移时给个抓手光标 */
+.editor-stage.panning, .viewer-stage.panning { cursor: grabbing; }
+/* flex:none 很关键 —— 默认 flex-shrink:1 会在放大超出容器时把画布**宽度**压回容器宽，
+   高度却照旧，图就被拉变形了。加上它之后：内容该多大就多大，多出来交给滚动条。 */
+.editor-canvas { position: relative; line-height: 0; cursor: crosshair; margin: auto; flex: none; }
+.editor-canvas img {
+  display: block; width: 100%; height: 100%; user-select: none;
+  background-color: #22262d;
+  background-image:
+    linear-gradient(45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(-45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2f353f 75%),
+    linear-gradient(-45deg, transparent 75%, #2f353f 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.ebox {
+  position: absolute; box-sizing: border-box;
+  border: 1.5px solid #ffcf5c; background: rgba(255, 207, 92, .14);
+  cursor: move;
+}
+.ebox.sel { border-color: #4f9cf9; background: rgba(79, 156, 249, .18); }
+.ebox-tag {
+  position: absolute; left: 0; top: -15px;   /* 序号放框外面 */
+  padding: 0 4px; font-size: 10px; line-height: 14px; color: #2a1c00;
+  background: #ffcf5c; border-radius: 3px;
+  pointer-events: none;
+}
+.ebox.sel .ebox-tag { background: #4f9cf9; color: #04121f; }
+/* 框紧贴图顶边时没有上方空间，缩回框内 */
+.ebox.tight .ebox-tag { top: 1px; left: 1px; }
+.ebox-h {
+  position: absolute; width: 12px; height: 12px;
+  background: transparent; border: none;   /* 纯透明：不影响看像素，拖动时才有反馈 */
+}
+.ebox-h.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.ebox-h.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.ebox-h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.ebox-h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.ebox-h.hot {
+  background: rgba(79, 156, 249, .22);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  border-radius: 2px;
+}
+
+.editor-side {
+  flex: 0 0 300px; display: flex; flex-direction: column;
+  border-left: 1px solid var(--line); min-height: 0;
+}
+.editor-side-head {
+  flex: 0 0 auto; padding: 8px 10px; color: var(--muted); font-size: 11.5px;
+  border-bottom: 1px solid var(--line);
+}
+.editor-list { flex: 1 1 auto; overflow: auto; padding: 6px; }
+.editor-empty { padding: 14px 8px; color: #6c7480; font-size: 11.5px; text-align: center; }
+.erow {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 5px; border-radius: 6px; cursor: pointer;
+}
+.erow:hover { background: var(--panel-2); }
+.erow.sel { background: rgba(79, 156, 249, .14); box-shadow: inset 0 0 0 1px rgba(79, 156, 249, .5); }
+/* 显示/隐藏这个区域：方块亮着=画在图上 */
+.erow-eye {
+  flex: 0 0 auto; width: 13px; height: 13px; padding: 0;
+  border: 1px solid #3a4049; border-radius: 3px; background: transparent;
+}
+.erow-eye.on { background: var(--accent); border-color: var(--accent); }
+.erow.off .erow-n { color: #4d5563; }
+.erow.off .erow-f input { color: #6c7480; }
+.erow-n {
+  flex: 0 0 auto; width: 16px; text-align: center;
+  color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+.erow-f { display: flex; flex-direction: column; gap: 1px; flex: 1 1 0; min-width: 0; }
+.erow-f span { color: #6c7480; font-size: 9.5px; letter-spacing: .3px; }
+.erow-f input {
+  width: 100%; min-width: 0;
+  padding: 3px 4px; font: inherit; font-size: 11px; color: var(--text);
+  background: #12141a; border: 1px solid var(--line); border-radius: 4px; outline: none;
+}
+/* 去掉数字输入框的上下小箭头：这里本来就窄，留着会把 4 位数字挤没 */
+.erow-f input::-webkit-outer-spin-button,
+.erow-f input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.erow-f input { appearance: textfield; -moz-appearance: textfield; }
+.erow-f input:focus { border-color: var(--accent); }
+.erow-del {
+  flex: 0 0 auto; padding: 2px 6px; font-size: 12px; line-height: 1.2;
+  color: var(--muted); background: transparent; border-color: transparent;
+}
+.erow-del:hover:not(:disabled) { color: var(--err); border-color: rgba(239, 95, 95, .5); }
+.editor-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-top: 1px solid var(--line);
+}
+.editor-foot .spacer { flex: 1; }
+
+/* ---------------- 大图查看器（双击数据节点打开） ---------------- */
+.viewer-mask {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(6, 8, 11, .9);
+}
+.viewer-bar {
+  position: absolute; left: 0; right: 0; top: 0; height: 46px;
+  display: flex; align-items: center; gap: 9px; padding: 0 14px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.viewer-bar .spacer { flex: 1; }
+.viewer-name { font-weight: 600; font-size: 12.5px; }
+.viewer-meta {
+  color: var(--muted); font-size: 12px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.viewer-stage {
+  position: absolute; inset: 46px 0 0; overflow: auto;
+  cursor: default;                     /* 点哪儿都不再关窗口了，所以不再是 zoom-out */
+}
+.viewer-stage img {
+  display: block; margin: 12px auto;
+  cursor: default;
+  /* 透明区域下面垫一层棋盘格，抠图结果一眼就能看出哪里是透明的 */
+  background-color: #22262d;
+  background-image:
+    linear-gradient(45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(-45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2f353f 75%),
+    linear-gradient(-45deg, transparent 75%, #2f353f 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.viewer-stage.fit img {
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 94px);
+}
+.viewer-stage.actual img {
+  max-width: none; max-height: none;   /* 1:1，超出就滚动 */
+}
+
+/* React Flow 控件深色化 */
+.react-flow__controls { box-shadow: 0 2px 10px rgba(0,0,0,.4); border-radius: 8px; overflow: hidden; }
+.react-flow__controls-button {
+  background: var(--panel-2); border-bottom: 1px solid var(--line); border-left: none; border-right: none;
+}
+.react-flow__controls-button:hover { background: #2d323b; }
+.react-flow__controls-button svg { fill: var(--text); }
+.react-flow__minimap { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+
+/* React Flow handle 微调 */
+.react-flow__handle {
+  width: 9px; height: 9px; background: #46536b; border: 1px solid #6d7c96;
+}
+.react-flow__handle.connectionindicator:hover { background: var(--accent); }
+.react-flow__handle-left { left: -5px; }
+.react-flow__handle-right { right: -5px; }
+.react-flow__edge-path { stroke-width: 1.5; }
+
+/* ---------------- 节点缩放手柄（右下角一个小方块） ---------------- */
+.resize-handle {
+  position: absolute; right: 3px; bottom: 3px; z-index: 5;
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  background: #3a4453;
+  border: 1px solid #59647a;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.node:hover .resize-handle,
+.node.selected .resize-handle {
+  background: var(--accent);
+  border-color: #9cc8fb;
+}

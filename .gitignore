@@ -1,0 +1,51 @@
+# ============================================================
+# ImageProcessFlow — 只保留可复现的源码，忽略依赖 / 产物 / 运行时数据
+# ============================================================
+
+# ---------- Python 依赖与虚拟环境 ----------
+runtime/venv/
+runtime/pip-cache/
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+
+# ---------- Python 缓存 ----------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- Node / 前端依赖与产物 ----------
+web/node_modules/
+node_modules/
+web/dist/
+dist/
+server/static/
+*.tsbuildinfo
+
+# ---------- 运行时临时数据 ----------
+runtime/tmp/
+temp/
+*.log
+
+# ---------- 工作目录（节点画布 + 图片，运行时数据，不进仓库）----------
+workspace/
+demo/
+
+# ---------- 应用运行时设置（本地偏好，运行时生成）----------
+settings.json
+
+# ---------- 测试产生的截图 ----------
+runtime/uicheck_*.png
+
+# ---------- 编辑器 / 系统杂项 ----------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

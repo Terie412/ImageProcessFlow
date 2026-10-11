@@ -1,0 +1,84 @@
+{
+  "id": "crop",
+  "name": "裁剪",
+  "entry": "crop.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "label": "",
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "regions",
+      "type": "regions",
+      "primary": true,
+      "default": [],
+      "label": "裁剪区域"
+    }
+  ],
+  "outputs": [{ "key": "image", "type": "image", "multi": true }],
+
+  "_comment_detect": "「自动识别」怎么跑：把这张图 + 下面这份参数卡交给多模态模型，模型只返回脚本参数，真正的边界由 extract_elements.py 这个纯几何算法算出来",
+  "detect": {
+    "script": "../_shared/extract_elements.py",
+    "args": {
+      "method": {
+        "type": "enum",
+        "options": ["auto", "gutter", "cluster"],
+        "default": "auto",
+        "desc": "切分策略。gutter=递归按「整行/整列全是背景」的空白沟槽切开，适合排列规整的元素（图标表、底部导航栏、网格卡片），只切本来就断开的地方、绝不会切穿一个连通元素；cluster=连通域 + 按外接框间距聚类，适合大小不一、散乱排布的元素，但元素间距和元素内部碎块间距接近时会拿不准；auto=先试 gutter，切不出 2 个以上区域就退回 cluster"
+      },
+      "min_gutter": {
+        "type": "int",
+        "min": 0,
+        "max": 300,
+        "default": 0,
+        "desc": "沟槽最少厚度（像素），0=自动（按图短边的 0.2% 算）。元素挨得很近就调小，想更保守（宁可切不开也不要误切）就调大"
+      },
+      "max_gap": {
+        "type": "int",
+        "min": 0,
+        "max": 800,
+        "default": 0,
+        "desc": "cluster 允许的最大间距（像素），0=自动（按长边的 5% 算）。元素散得越开就要越大"
+      },
+      "min_area": {
+        "type": "int",
+        "min": 0,
+        "max": 500000,
+        "default": 0,
+        "desc": "连通域最小面积（像素），0=自动。图上有零星噪点、杂质时调大可以把它们滤掉"
+      },
+      "color_thr": {
+        "type": "int",
+        "min": 1,
+        "max": 128,
+        "default": 24,
+        "desc": "颜色差阈值（背景不透明时用它区分前景/背景），**没有「0=自动」这回事**，默认 24 通常就是最优；调小更敏感，小于 8 会把背景噪声当成前景"
+      },
+      "alpha_thr": {
+        "type": "int",
+        "min": 1,
+        "max": 128,
+        "default": 24,
+        "desc": "alpha 差阈值（背景带透明时用它），**没有「0=自动」这回事**，默认 24 通常就是最优；填 0 会让 alpha>0 的极淡底噪全变成前景、整张图糊成一个区域"
+      },
+      "pad": {
+        "type": "int",
+        "min": 0,
+        "max": 64,
+        "default": 8,
+        "desc": "每个区域向外留的边距（像素），会直接写进区域坐标，所以用户在预览里能看到。0 就是不扩边"
+      }
+    },
+    "notes": "先判断这张图属于哪种情况再挑参数：排列规整（图标表 / 导航栏 / 网格卡片）→ method=gutter；大小不一、散乱排布 → method=cluster；拿不准就 auto。背景是透明的就主要靠 alpha 判定，别去猜 RGB。\n\nmin_gutter / max_gap / min_area 这三个填 0 表示「按图自动算」，这才是推荐的用法；而 color_thr / alpha_thr **不是**自动参数，别填 0，保持默认 24 即可，除非图上确实有噪声或需要更敏感的判定。多数情况下把方法选对就够了，其余保持默认。"
+  },
+
+  "size": {
+    "defaultWidth": 560,
+    "defaultHeight": 480
+  }
+}
