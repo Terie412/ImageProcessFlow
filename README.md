@@ -74,12 +74,22 @@ start.bat
 > 国内装依赖慢的话：pip 加 `-i https://pypi.tuna.tsinghua.edu.cn/simple`（`web/.npmrc` 里已经配好了 npmmirror）。
 > 不想让 pip 缓存落到 C 盘就再加 `--cache-dir runtime\pip-cache`。
 
-### ⚠️ 三个最容易卡住的地方
+### ⚠️ 四个最容易卡住的地方
 
 1. **venv 路径不能改。** `start.bat` 里写死了 `runtime\venv\Scripts\python.exe`。想用别的解释器就别走 bat，直接跑
    `python server\main.py -w <工作目录>`。
 2. **必须先 `npm run build`。** `server/static` 是 vite 的构建产物、不在仓库里。没有它服务照样起得来，但打开 8770 是 **404** —— 后端只在 `server/static` 存在时才挂载静态目录（`server/main.py` 里那句 `if STATIC_DIR.is_dir()`）。做前端开发时改用 `npm run dev`（见下方「开发」）。
 3. **`npm install` 可能漏装 optional 依赖。** 某些沙箱环境会往 Node 进程注入 `NODE_OPTIONS` 垫片，导致 `@rollup/rollup-win32-x64-msvc` / `@esbuild/win32-x64` 漏装，`vite build` 报 `Cannot find module @rollup/...`。补装命令见「开发」一节。
+4. **`start.bat` 必须是 CRLF 行尾，否则满屏乱码。** 批处理里有中文，cmd 读 LF-only 的批处理时**字节偏移会算错**，从中间截断命令行，表现是一堆
+   `'...' 不是内部或外部命令`（服务其实照样起得来，纯粹难看+吓人）。仓库里 `.gitattributes` 已经写了 `*.bat text eol=crlf`，
+   正常 clone 就是对的；**只有**工作区这份被某个只写 LF 的编辑器改过才会中招。自查与修复：
+
+   ```bat
+   git ls-files --eol start.bat        :: 看 w/lf 还是 w/crlf，要 crlf
+   git rm --cached start.bat && git checkout start.bat   :: 让 git 按 .gitattributes 重新检出
+   ```
+
+   > 别用「另存为 UTF-8」的记事本/编辑器直接改完就提交 —— 中文没问题（配合 `chcp 65001` 显示正常），**行尾**才是坑。
 
 > 首次启动**不会有 `settings.json`**，这是正常的 —— 程序会用默认值生成，它是本地偏好、已被 gitignore。
 
