@@ -68,8 +68,8 @@ def part_a() -> None:
     check("存了 h=150 但下限是 180 → 被下限兜到 180", rh({"h": 150}) == 180, str(rh({"h": 150})))
     check("存了 h=364 → 用 364", rh({"h": 364}) == 364, str(rh({"h": 364})))
     check("间距不再写死：调矮后间距跟着变",
-          rh({}) + 30 == 310 and rh({"h": 180}) + 30 == 210,
-          f"280→{rh({}) + 30}, 180→{rh({'h': 180}) + 30}")
+          rh({}) + 10 == 290 and rh({"h": 180}) + 10 == 190,
+          f"280→{rh({}) + 10}, 180→{rh({'h': 180}) + 10}")
 
     # 用户把节点拖大了 → 落点跟着让开
     proc2 = dict(proc, w=880)
@@ -107,14 +107,14 @@ def part_a() -> None:
     print(f"   移动了 {n} 个；结果 {pos}")
     check("三个输出都被移动", n == 3, str(n))
     check("都摆到节点右侧（x = 600+64）", all(pos[k][0] == 664 for k in ("r1", "r2", "r3")), str(pos))
-    check("纵向按序号排开（间距 310 = 280+30）",
-          pos["r1"][1] == 0 and pos["r2"][1] == 310 and pos["r3"][1] == 620, str(pos))
+    check("纵向按序号排开（间距 290 = 280+10）",
+          pos["r1"][1] == 0 and pos["r2"][1] == 290 and pos["r3"][1] == 580, str(pos))
     check("输入节点没被碰", pos["r4"] == (5, 5), str(pos["r4"]))
     n2 = engine_mod.tidy_outputs(g, {"qwen_image": manifest}, settings)
     check("再跑一次是幂等的（不再移动）", n2 == 0, str(n2))
 
     # 回归：数据节点被调矮到 180 时，必须排得紧凑（用户报的问题）
-    print("\n[tidy_outputs] 数据节点高 180 → 应该只留 30 的缝")
+    print("\n[tidy_outputs] 数据节点高 180 → 应该只留 10 的缝")
     g2 = {
         "processes": [{"id": "p1", "defId": "qwen_image", "x": 0, "y": 0, "w": 600}],
         "resources": [
@@ -125,8 +125,8 @@ def part_a() -> None:
     engine_mod.tidy_outputs(g2, {"qwen_image": manifest}, settings)
     ys = [r["y"] for r in sorted(g2["resources"], key=lambda r: r["index"])]
     print(f"   四个节点的 y：{ys}")
-    check("相邻间距 = 180 + 30 = 210（不再是写死的 310）", ys == [0, 210, 420, 630], str(ys))
-    check("缝隙正好是 30", all(ys[i + 1] - ys[i] - 180 == 30 for i in range(3)), str(ys))
+    check("相邻间距 = 180 + 10 = 190（不再是写死的 290）", ys == [0, 190, 380, 570], str(ys))
+    check("缝隙正好是 10", all(ys[i + 1] - ys[i] - 180 == 10 for i in range(3)), str(ys))
 
     # 高低不一的一组：按每个节点自己的高度逐个累加
     print("\n[tidy_outputs] 高低不一的一组也要紧密贴合")
@@ -141,7 +141,7 @@ def part_a() -> None:
     engine_mod.tidy_outputs(g3, {"qwen_image": manifest}, settings)
     ys3 = [r["y"] for r in sorted(g3["resources"], key=lambda r: r["index"])]
     print(f"   三个节点的 y：{ys3}（高 180 / 400 / 180）")
-    check("按各自高度累加：0 → 210 → 640", ys3 == [0, 210, 640], str(ys3))
+    check("按各自高度累加：0 → 190 → 600", ys3 == [0, 190, 600], str(ys3))
 
 
 # ------------------------------------------------------ B. 真实执行一遍
@@ -220,8 +220,8 @@ def part_b() -> None:
         gaps = [outs[i + 1]["y"] - outs[i]["y"] for i in range(len(outs) - 1)]
         check("相邻输出不重叠（间距 ≥ 数据节点高）", all(gp >= rh for gp in gaps),
               f"间距 {[round(x) for x in gaps]} >= {rh:.0f}")
-        check("纵向留白正好是 SLOT_GAP_Y(30)，不多不少", all(abs(gp - (rh + 30)) < 1e-6 for gp in gaps),
-              f"间距 {[round(x) for x in gaps]} == {rh:.0f}+30")
+        check("纵向留白正好是 SLOT_GAP_Y(10)，不多不少", all(abs(gp - (rh + 10)) < 1e-6 for gp in gaps),
+              f"间距 {[round(x) for x in gaps]} == {rh:.0f}+10")
 
         xs = {round(o["x"]) for o in outs}
         check("同一列对齐", len(xs) == 1, str(xs))

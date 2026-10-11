@@ -33,7 +33,7 @@ RUN_TIMEOUT_SEC = 900
 PROCESS_DEFAULT_W = 600      # 与前端 PROCESS_SIZE.w 一致
 RESOURCE_DEFAULT_H = 280     # 与前端 RESOURCE_SIZE.h 一致
 SLOT_GAP_X = 64              # 输出节点与处理节点之间的横向留白
-SLOT_GAP_Y = 30              # 相邻输出槽位之间的纵向留白
+SLOT_GAP_Y = 10              # 相邻输出槽位之间的纵向留白（用户手动排布时用的就是这个量级）
 
 
 def _as_float(v, dflt: float = 0.0) -> float:
