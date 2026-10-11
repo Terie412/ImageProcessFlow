@@ -28,6 +28,8 @@ RUN_TIMEOUT_SEC = 900
 # 输出槽位落点：**按节点实际尺寸推算**，不能写死偏移量。
 # 早期写死 380/210，那是按 280 宽的处理节点算的；节点一旦被调大（默认已到 600 宽、
 # 数据节点 280 高），输出节点就会横向压住上游、纵向互相压。
+# 纵向的间距同样不能写死 —— 见 `resource_height()`：必须按**数据节点的实际渲染高**
+# 逐个累加，否则用户把数据节点调矮之后，每两个节点之间会空出一大截。
 PROCESS_DEFAULT_W = 600      # 与前端 PROCESS_SIZE.w 一致
 RESOURCE_DEFAULT_H = 280     # 与前端 RESOURCE_SIZE.h 一致
 SLOT_GAP_X = 64              # 输出节点与处理节点之间的横向留白
@@ -55,23 +57,40 @@ def _node_min(settings: dict | None, key: str, dflt: tuple[float, float]) -> tup
     )
 
 
-def slot_spec(proc: dict, manifest: dict, settings: dict | None) -> tuple[float, float, float]:
-    """输出槽位的位置参数：(起始 x, 起始 y, 槽位纵向间距)。"""
+def resource_height(r: dict | None, settings: dict | None) -> float:
+    """数据节点的**实际渲染高度**。
+
+    必须和前端 App.jsx 的算法保持一致：`max(设置里的下限, 存的 h ?? RESOURCE_SIZE.h)`
+    —— 存的 h 是用户拖右下角改过的大小，没存过才用默认 280。
+
+    这个值决定相邻输出槽位的纵向间距。**不能写死 280**：用户把数据节点调矮（例如
+    180）之后，还按 280 排就会在每个节点之间空出一大截（310 - 180 = 130）。
+    """
+    min_h = _node_min(settings, "resource", (0.0, RESOURCE_DEFAULT_H))[1]
+    return max(min_h, _as_float((r or {}).get("h")) or RESOURCE_DEFAULT_H)
+
+
+def slot_origin(proc: dict, manifest: dict, settings: dict | None) -> tuple[float, float]:
+    """输出槽位的左上起点：(x, y)。
+
+    横向按**处理节点的实际宽度**让开（不写死偏移量）；纵向的累加见
+    `resource_height()` —— 每个槽位从上**一个节点的实际高度**往下排。
+    """
     min_w, _ = _node_min(
         settings, f"process:{proc.get('defId')}", (PROCESS_DEFAULT_W, RESOURCE_DEFAULT_H)
     )
-    _, min_rh = _node_min(settings, "resource", (0.0, RESOURCE_DEFAULT_H))
     sz = manifest.get("size") or {}
     proc_w = max(
         min_w,
         _as_float(proc.get("w")) or _as_float(sz.get("defaultWidth")) or PROCESS_DEFAULT_W,
     )
-    res_h = max(min_rh, RESOURCE_DEFAULT_H)
-    return (proc.get("x", 0) + proc_w + SLOT_GAP_X, proc.get("y", 0), res_h + SLOT_GAP_Y)
+    return (proc.get("x", 0) + proc_w + SLOT_GAP_X, proc.get("y", 0))
 
 
 def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
     """把所有输出数据节点重新摆到各自处理节点的右侧、按槽位序号纵向排开。
+
+    纵向间距按**每个节点自己的高度**逐个累加，所以高低不一的一组也能紧凑排好。
 
     返回被移动的节点数。用于收拾历史上被写死偏移量摆歪的画布。
     """
@@ -86,12 +105,12 @@ def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
         proc = procs.get(pid)
         if proc is None:
             continue
-        base_x, base_y, gap_y = slot_spec(proc, registry.get(proc.get("defId")) or {}, settings)
-        for i, r in enumerate(sorted(items, key=lambda x: x.get("index", 0))):
-            nx, ny = base_x, base_y + i * gap_y
-            if _as_float(r.get("x")) != nx or _as_float(r.get("y")) != ny:
-                r["x"], r["y"] = nx, ny
+        base_x, y = slot_origin(proc, registry.get(proc.get("defId")) or {}, settings)
+        for r in sorted(items, key=lambda x: x.get("index", 0)):
+            if _as_float(r.get("x")) != base_x or _as_float(r.get("y")) != y:
+                r["x"], r["y"] = base_x, y
                 moved += 1
+            y += resource_height(r, settings) + SLOT_GAP_Y
     return moved
 
 
@@ -346,7 +365,7 @@ def execute(
         _remove_resource(graph, r["id"])
         emit(f"[engine] 输出变少，第 {idx + 1} 个槽位已被移除")
 
-    base_x, base_y, gap_y = slot_spec(proc, manifest, settings)
+    base_x, cursor_y = slot_origin(proc, manifest, settings)
 
     for i, src in enumerate(produced):
         r = existing.get(i)
@@ -358,12 +377,16 @@ def execute(
                 "producer": pid,
                 "index": i,
                 "x": base_x,
-                "y": base_y + i * gap_y,
+                "y": cursor_y,
             }
             graph["resources"].append(r)
             emit(f"[engine] 新增输出槽位 #{i} → 图片「{r['name']}」")
         else:
             ws.delete_image(r["name"])  # 原地刷新：删掉旧文件
+        # 下一个槽位从**这一个节点自己的位置和高度**往下让开一点点：
+        # 已有槽位的位置不会被改动（用户手动拖过就尊重用户），但间距得按它的实际
+        # 高度算，否则节点调矮之后中间会空出一大截。
+        cursor_y = _as_float(r.get("y"), cursor_y) + resource_height(r, settings) + SLOT_GAP_Y
         dest = ws.images_dir / f"{r['name']}{src.suffix.lower()}"
         shutil.move(str(src), str(dest))
 
