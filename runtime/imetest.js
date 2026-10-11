@@ -3,11 +3,11 @@
 // 全程在一次性临时工作目录里跑，不碰用户的真实工作目录。
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9227
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-ime'
+const TMPWS = `${RUNTIME}/testws-ime`
 
 const chrome = spawn(
   CHROME,
@@ -17,7 +17,7 @@ const chrome = spawn(
     // 全新 profile 首次启动会加载默认扩展，拖慢并霸占 target 列表
     '--disable-extensions', '--disable-component-extensions-with-background-pages',
     `--remote-debugging-port=${PORT}`,
-    '--user-data-dir=D:/Workspace/ImageProcessFlow/runtime/chrome-profile-ime',
+    `--user-data-dir=${RUNTIME}/chrome-profile-ime`,
     '--window-size=1400,1000',
     'about:blank',
   ],
@@ -180,7 +180,7 @@ async function main() {
     chrome.kill()
     await post('/api/workspace', { path: origWs })
     rmSync(TMPWS, { recursive: true, force: true })
-    rmSync('D:/Workspace/ImageProcessFlow/runtime/chrome-profile-ime', { recursive: true, force: true })
+    rmSync(`${RUNTIME}/chrome-profile-ime`, { recursive: true, force: true })
     console.log(`\n已恢复工作目录: ${origWs}`)
   }
 

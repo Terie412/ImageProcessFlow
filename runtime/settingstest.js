@@ -2,12 +2,12 @@
 // 全程在一次性临时工作目录里跑，不碰用户的真实工作目录。
 import { spawn } from 'node:child_process'
 import { readFileSync, rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9226
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const SEED = 'D:/Workspace/ImageProcessFlow/runtime/seed.png'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-settings'
+const SEED = `${RUNTIME}/seed.png`
+const TMPWS = `${RUNTIME}/testws-settings`
 
 const chrome = spawn(
   CHROME,
@@ -15,7 +15,7 @@ const chrome = spawn(
     '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`,
-    '--user-data-dir=D:/Workspace/ImageProcessFlow/runtime/chrome-profile-settings',
+    `--user-data-dir=${RUNTIME}/chrome-profile-settings`,
     '--window-size=1400,1000',
     'about:blank',
   ],
@@ -223,7 +223,7 @@ async function main() {
     await sleep(500)
     const shot = await send('Page.captureScreenshot', { format: 'png' })
     const { writeFileSync } = await import('node:fs')
-    writeFileSync('D:/Workspace/ImageProcessFlow/runtime/settings.png', Buffer.from(shot.data, 'base64'))
+    writeFileSync(`${RUNTIME}/settings.png`, Buffer.from(shot.data, 'base64'))
     console.log('  已保存 runtime/settings.png')
   } finally {
     ws.close()
@@ -231,7 +231,7 @@ async function main() {
     await patch('/api/settings', origSettings)  // 恢复用户原本的偏好，不写死
     await post('/api/workspace', { path: origWs })
     rmSync(TMPWS, { recursive: true, force: true })
-    rmSync('D:/Workspace/ImageProcessFlow/runtime/chrome-profile-settings', { recursive: true, force: true })
+    rmSync(`${RUNTIME}/chrome-profile-settings`, { recursive: true, force: true })
     console.log(`\n已恢复工作目录 ${origWs}、设置原值，临时目录已清理`)
   }
 

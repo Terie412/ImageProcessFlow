@@ -2,11 +2,11 @@
 // 全程在一次性临时工作目录里跑，不碰用户的真实工作目录。
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9223
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-drag'
+const TMPWS = `${RUNTIME}/testws-drag`
 
 const chrome = spawn(
   CHROME,
@@ -14,7 +14,7 @@ const chrome = spawn(
     '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`,
-    '--user-data-dir=D:/Workspace/ImageProcessFlow/runtime/chrome-profile',
+    `--user-data-dir=${RUNTIME}/chrome-profile`,
     '--window-size=1400,1000',
     'about:blank',
   ],

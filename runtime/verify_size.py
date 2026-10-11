@@ -14,8 +14,8 @@ from pathlib import Path
 
 from PIL import Image
 
+ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8770"
-ROOT = Path("D:/Workspace/ImageProcessFlow")
 TMPWS = ROOT / "runtime" / "size_ws"
 SEED = ROOT / "runtime" / "seed.png"
 

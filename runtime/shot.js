@@ -1,11 +1,11 @@
 // 用 CDP 驱动无头 Chrome：导航 → 派发 contextmenu → 截图
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9222
 const URL_ = process.argv[2] || 'http://127.0.0.1:8770'
-const OUT = process.argv[3] || 'D:/Workspace/ImageProcessFlow/runtime/shot.png'
+const OUT = process.argv[3] || `${RUNTIME}/shot.png`
 
 const chrome = spawn(
   CHROME,
@@ -13,7 +13,7 @@ const chrome = spawn(
     '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`,
-    '--user-data-dir=D:/Workspace/ImageProcessFlow/runtime/chrome-profile',
+    `--user-data-dir=${RUNTIME}/chrome-profile`,
     '--window-size=1680,1050',
     'about:blank',
   ],

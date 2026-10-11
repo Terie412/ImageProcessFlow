@@ -1,11 +1,11 @@
 // 诊断缩放手柄：坐标对不对？命中的是谁？CDP 的事件到得到它吗？
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9234
 const URL = process.argv[2] || 'http://127.0.0.1:8770'
-const PROFILE = 'D:/Workspace/ImageProcessFlow/runtime/chrome-ptr'
+const PROFILE = `${RUNTIME}/chrome-ptr`
 
 try { rmSync(PROFILE, { recursive: true, force: true }) } catch { /* Chrome 可能还占着目录 */ }
 const chrome = spawn(

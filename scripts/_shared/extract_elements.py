@@ -361,11 +361,17 @@ def checkerboard(size, cell=16, c1=(206, 206, 206), c2=(238, 238, 238)):
 
 
 def get_font(size):
-    for p in (r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\arial.ttf"):
-        try:
-            return ImageFont.truetype(p, size)
-        except Exception:
-            pass
+    """尽量找一个能显示中文的字体，找不到就退回 PIL 内置位图字体。
+
+    字体目录从 %WINDIR% 取，不写死盘符；非 Windows 上直接走兜底。
+    """
+    fonts_dir = os.environ.get("WINDIR")
+    if fonts_dir:
+        for name in ("msyh.ttc", "simhei.ttf", "arial.ttf"):
+            try:
+                return ImageFont.truetype(os.path.join(fonts_dir, "Fonts", name), size)
+            except Exception:
+                pass
     return ImageFont.load_default()
 
 

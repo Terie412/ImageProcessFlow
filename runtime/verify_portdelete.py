@@ -12,8 +12,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8770"
-ROOT = Path("D:/Workspace/ImageProcessFlow")
 TMPWS = ROOT / "runtime" / "portdel_ws"
 SEED = ROOT / "runtime" / "seed.png"
 

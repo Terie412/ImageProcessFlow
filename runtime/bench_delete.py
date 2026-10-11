@@ -9,9 +9,10 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8770"
-TMPWS = "D:/Workspace/ImageProcessFlow/runtime/benchws"
-BIG = "D:/Workspace/ImageProcessFlow/workspace/images/E.png"   # 1536x2720, ~3MB
+TMPWS = str(ROOT / "runtime" / "benchws")
+BIG = str(ROOT / "workspace" / "images" / "E.png")   # 1536x2720, ~3MB
 
 
 def call(method, path, body=None):

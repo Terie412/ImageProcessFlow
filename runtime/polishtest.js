@@ -2,13 +2,13 @@
 // 会真实调用 1 次 DeepSeek（很便宜，非生图）。全程在一次性临时工作目录里跑。
 import { spawn } from 'node:child_process'
 import { readFileSync, rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9228
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const SEED = 'D:/Workspace/ImageProcessFlow/runtime/seed.png'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-polish'
-const PROFILE = 'D:/Workspace/ImageProcessFlow/runtime/chrome-profile-polish'
+const SEED = `${RUNTIME}/seed.png`
+const TMPWS = `${RUNTIME}/testws-polish`
+const PROFILE = `${RUNTIME}/chrome-profile-polish`
 
 const ORIGINAL = '把背景去掉，只留下三个形状'
 

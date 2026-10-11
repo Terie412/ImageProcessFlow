@@ -11,8 +11,9 @@ import sys
 import urllib.request
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8770"
-WS = Path("D:/Workspace/ImageProcessFlow/demo")
+WS = ROOT / "demo"
 OK, FAIL = "PASS", "FAIL"
 results: list[tuple[str, str, str]] = []
 

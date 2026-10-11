@@ -1,10 +1,10 @@
 // 查看页面上各节点的实际渲染尺寸与内联 style，排查尺寸不生效的问题。
 import { spawn } from 'node:child_process'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9232
 const URL = process.argv[2] || 'http://127.0.0.1:8770'
-const PROFILE = 'D:/Workspace/ImageProcessFlow/runtime/chrome-size'
+const PROFILE = `${RUNTIME}/chrome-size`
 
 const chrome = spawn(
   CHROME,

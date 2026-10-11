@@ -15,8 +15,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8770"
-DEMO = Path("D:/Workspace/ImageProcessFlow/demo")
+DEMO = ROOT / "demo"
 
 
 def call(method: str, path: str, body=None):

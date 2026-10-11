@@ -435,7 +435,7 @@ export default function App() {
       .then((s) => {
         applyState(s)
         if (!s.workspace) {
-          setWsInput('D:\\workspace')
+          setWsInput('')
           setShowWs(true)
         }
       })
@@ -985,7 +985,7 @@ export default function App() {
             <input
               type="text"
               value={wsInput}
-              placeholder="例如 D:\workspace\my-project"
+              placeholder="输入工作目录的完整路径"
               onChange={(e) => setWsInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && chooseWorkspace()}
             />

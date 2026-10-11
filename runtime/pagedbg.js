@@ -2,11 +2,11 @@
 // 用法: node runtime/pagedbg.js [url]
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9231
 const URL = process.argv[2] || 'http://127.0.0.1:8770'
-const PROFILE = 'D:/Workspace/ImageProcessFlow/runtime/chrome-dbg'
+const PROFILE = `${RUNTIME}/chrome-dbg`
 
 rmSync(PROFILE, { recursive: true, force: true })
 const chrome = spawn(

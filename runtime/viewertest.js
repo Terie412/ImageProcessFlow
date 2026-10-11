@@ -3,13 +3,13 @@
 // 依赖测试图 runtime/viewer_big.png（3000×2000 带透明区），与 seed.png 一样是固定素材。
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9236
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-viewer'
-const PROFILE = 'D:/Workspace/ImageProcessFlow/runtime/chrome-profile-viewer'
-const BIG = 'D:/Workspace/ImageProcessFlow/runtime/viewer_big.png'
+const TMPWS = `${RUNTIME}/testws-viewer`
+const PROFILE = `${RUNTIME}/chrome-profile-viewer`
+const BIG = `${RUNTIME}/viewer_big.png`
 
 try { rmSync(PROFILE, { recursive: true, force: true }) } catch { /* Chrome 可能还占着目录 */ }
 const chrome = spawn(

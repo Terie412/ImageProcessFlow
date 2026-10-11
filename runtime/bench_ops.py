@@ -7,11 +7,12 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "D:/Workspace/ImageProcessFlow/server")
+APP = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(APP / "server"))
 from workspace import Workspace  # noqa: E402
 
-ROOT = Path("D:/Workspace/ImageProcessFlow/runtime/opbench")
-SRC = Path("D:/Workspace/ImageProcessFlow/workspace/images/E.png")
+ROOT = APP / "runtime" / "opbench"
+SRC = APP / "workspace" / "images" / "E.png"
 BIG = SRC.read_bytes()
 print(f"测试图大小: {len(BIG)/1024/1024:.1f} MB")
 

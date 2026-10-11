@@ -3,14 +3,14 @@
 // 全程在一次性临时工作目录里跑，不碰用户的真实画布。
 import { spawn } from 'node:child_process'
 import { readFileSync, rmSync, readFileSync as rd } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9235
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const SEED = 'D:/Workspace/ImageProcessFlow/runtime/seed.png'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-layout'
-const PROFILE = 'D:/Workspace/ImageProcessFlow/runtime/chrome-profile-layout'
-const SETTINGS_FILE = 'D:/Workspace/ImageProcessFlow/settings.json'
+const SEED = `${RUNTIME}/seed.png`
+const TMPWS = `${RUNTIME}/testws-layout`
+const PROFILE = `${RUNTIME}/chrome-profile-layout`
+const SETTINGS_FILE = `${ROOT}/settings.json`
 
 try { rmSync(PROFILE, { recursive: true, force: true }) } catch { /* Chrome 可能还占着目录 */ }
 const chrome = spawn(

@@ -10,7 +10,7 @@
 
 ```bat
 start.bat                          :: 不带参数启动，界面里再选工作目录
-start.bat -w D:\workspace\myproj   :: 直接指定工作目录
+start.bat -w <工作目录>            :: 直接指定工作目录
 ```
 
 然后浏览器打开 **http://127.0.0.1:8770**
@@ -270,13 +270,13 @@ runtime\venv\Scripts\python.exe server\main.py -w <工作目录>
 
 下面这套是本项目开发时的参照环境，换成自己的路径也行 —— **只要 venv 落在 `runtime\venv`**（`start.bat` 依赖它）。
 
-| 项 | 位置 |
-| --- | --- |
-| Python | `D:\Softwares\Python`（3.14.4，自带 tkinter，用于原生对话框） |
-| Python venv | `runtime\venv` |
-| pip 缓存 | `runtime\pip-cache` |
-| Node | `D:\Softwares\nodejs`（v22.23.3） |
-| npm 缓存 | `D:\Softwares\npm-cache`（在 `web\.npmrc` 里配置） |
+| 项 | 位置 | 说明 |
+| --- | --- | --- |
+| Python | 自备（实测 3.14.4） | 自带 tkinter，用于原生对话框。放哪都行，**不用写进仓库** |
+| Python venv | `runtime\venv` | 固定位置，`start.bat` 依赖它 |
+| pip 缓存 | `runtime\pip-cache` | 用 `--cache-dir` 指定；不指定会落在用户目录 |
+| Node | 自备（实测 22.x） | 只在构建前端时需要 |
+| npm 缓存 | `runtime\npm-cache` | 由 `web\.npmrc` 的 `cache=../runtime/npm-cache` 指定（相对路径） |
 
 ### ⚠️ 重装前端依赖时的坑
 

@@ -3,15 +3,15 @@
 // 全程在一次性临时工作目录里跑，不碰用户的真实画布。
 import { spawn } from 'node:child_process'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9300 + (process.pid % 400)
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const SRC = 'D:/Workspace/ImageProcessFlow/workspace/images/B.png'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-crop'
+const SRC = `${ROOT}/workspace/images/B.png`
+const TMPWS = `${RUNTIME}/testws-crop`
 // 每次跑用一个新的 profile 目录：不用去删旧的（沙箱里删目录可能被拦），
 // 也就不会因为残留 profile 导致 Chrome 起不来。
-const PROFILE = `D:/Workspace/ImageProcessFlow/runtime/tmp/chrome-crop-${Date.now()}`
+const PROFILE = `${RUNTIME}/tmp/chrome-crop-${Date.now()}`
 
 try { rmSync(PROFILE, { recursive: true, force: true }) } catch { /* Chrome 可能还占着目录 */ }
 const chrome = spawn(
@@ -304,12 +304,12 @@ async function main() {
 
     if (process.env.SHOT) {
       let shotPng = await send('Page.captureScreenshot', { format: 'png' })
-      writeFileSync('D:/Workspace/ImageProcessFlow/runtime/crop_node.png', Buffer.from(shotPng.data, 'base64'))
+      writeFileSync(`${RUNTIME}/crop_node.png`, Buffer.from(shotPng.data, 'base64'))
       const s2 = await center(`${sel(pid)} .region-shot`)
       await dblclick(s2.x, s2.y)
       await sleep(600)
       shotPng = await send('Page.captureScreenshot', { format: 'png' })
-      writeFileSync('D:/Workspace/ImageProcessFlow/runtime/crop_editor.png', Buffer.from(shotPng.data, 'base64'))
+      writeFileSync(`${RUNTIME}/crop_editor.png`, Buffer.from(shotPng.data, 'base64'))
       console.log('   已截图 runtime/crop_node.png + runtime/crop_editor.png')
     }
   } finally {

@@ -6,16 +6,16 @@
 // 全程用一次性临时工作目录，不碰用户真实画布；不调用任何模型。
 import { spawn } from 'node:child_process'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { CHROME, ROOT, RUNTIME } from './_common.js'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const PORT = 9400 + (process.pid % 400)
 const BASE = process.argv[2] || 'http://127.0.0.1:8770'
-const SRC = 'D:/Workspace/ImageProcessFlow/workspace/images/B.png'
-const TMPWS = 'D:/Workspace/ImageProcessFlow/runtime/testws-uicheck'
+const SRC = `${ROOT}/workspace/images/B.png`
+const TMPWS = `${RUNTIME}/testws-uicheck`
 // 每次跑用一个新的 profile 目录：不用去删旧的（沙箱里删目录可能被拦），也就不会
 // 因为残留 profile 导致 Chrome 起不来。
-const PROFILE = `D:/Workspace/ImageProcessFlow/runtime/tmp/chrome-regionui-${Date.now()}`
-const OUT = 'D:/Workspace/ImageProcessFlow/runtime/'
+const PROFILE = `${RUNTIME}/tmp/chrome-regionui-${Date.now()}`
+const OUT = `${RUNTIME}/`
 
 // 5 个真实识别结果 + 1 个贴顶边的（用来验证序号缩回框内）
 const REGIONS = [
