@@ -29,7 +29,8 @@ server/static/
 
 # ---------- 运行时临时数据 ----------
 runtime/tmp/
-runtime/npm-cache/
+**/runtime/npm-cache/
+**/runtime/tmp/
 temp/
 *.log
 
