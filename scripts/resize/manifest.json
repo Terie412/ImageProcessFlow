@@ -1,0 +1,41 @@
+{
+  "id": "resize",
+  "name": "调整分辨率",
+  "entry": "resize.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "输入图",
+      "count": 1,
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "width",
+      "type": "number",
+      "default": 1024,
+      "min": 1,
+      "max": 16384,
+      "label": "宽"
+    },
+    {
+      "key": "height",
+      "type": "number",
+      "default": 1024,
+      "min": 1,
+      "max": 16384,
+      "label": "高"
+    }
+  ],
+  "outputs": [{ "key": "image", "type": "image", "multi": true }],
+  "_note": "分辨率向量只有一份（宽/高两个数字框），所有输入图都会被拉到同一个尺寸；有几个输入口连了图就产出几张。最小尺寸不在这里声明 —— 它是用户级偏好，在界面设置里调（settings.json 的 nodeMin）。",
+  "size": {
+    "defaultWidth": 560,
+    "defaultHeight": 280
+  }
+}
