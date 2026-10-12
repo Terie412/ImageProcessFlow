@@ -794,12 +794,22 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
 }
 .canvas-pick > .lbl { color: var(--muted); font-size: 11.5px; margin-right: 4px; }
-.canvas-pick select {
-  font: inherit; font-size: 12px; color: var(--text);
-  background: transparent; border: none; outline: none; cursor: pointer;
-  height: 24px; padding: 0 2px 0 0; max-width: 180px;
+/* 下拉是**自己画的按钮**，不是 <select> —— 原生弹层由平台渲染（Windows 上是浅色
+   菜单），`color-scheme: dark` 和 `option` 的样式都管不住它：最后弹出来是白底，
+   而文字沿用我们这身浅色，等于白字白底（实测截图里几乎看不见）。 */
+.canvas-pick .pick-btn {
+  display: flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 5px; flex: 0 1 auto; min-width: 0;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  font-size: 12px; color: var(--text); cursor: pointer;
 }
-.canvas-pick select:disabled { color: var(--muted); }
+.canvas-pick .pick-btn:hover:not(:disabled),
+.canvas-pick .pick-btn.open { background: #333945; border-color: #414956; }
+.canvas-pick .pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+/* 箭头用 SVG：`▾` 转 180° 之后会在行框里偏上、还只有 9px 大，看着像个小点。
+   SVG 的盒子就是字形本身，转起来是绕自己的中心转的。 */
+.canvas-pick .pick-caret { display: flex; flex: 0 0 auto; color: var(--muted); transition: transform .12s; }
+.canvas-pick .pick-btn.open .pick-caret { transform: rotate(180deg); color: var(--text); }
 .canvas-pick .seg-btn {
   display: flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; padding: 0; flex: 0 0 auto;
@@ -808,13 +818,18 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .canvas-pick .seg-btn:hover:not(:disabled) { background: #333945; border-color: #414956; color: var(--text); }
 
-/* ⋯ 里的菜单（重命名 / 删除）—— 与设置浮层同一套外形 */
-.canvas-menu {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 45;
-  min-width: 118px; padding: 3px;
+/* 分段控件里弹出来的两种浮层：画布列表 / ⋯ 菜单（与设置浮层同一套外形） */
+.canvas-pop {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 45;
+  min-width: 150px; max-height: 340px; overflow: auto; padding: 3px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
 }
-.canvas-menu .ctx-item { font-size: 11.5px; padding: 4px 8px; }
-.canvas-menu .ctx-item.danger { color: var(--err); }
-.canvas-menu .ctx-item.danger:hover:not(:disabled) { background: rgba(239, 95, 95, .13); }
+.canvas-pop .ctx-item { font-size: 11.5px; padding: 4px 8px; }
+/* ⋯ 那份（只有「删除画布」一项）贴右边、窄一点 —— 挂在 ⋯ 底下才对得上 */
+.canvas-pop.more { left: auto; right: 0; min-width: 112px; }
+/* 当前画布那一行：蓝色 + 淡底，一眼看出「你在哪一张」 */
+.canvas-pop .ctx-item.on { color: var(--accent); background: rgba(79, 156, 249, .1); }
+.canvas-pop .ctx-item.on:hover { background: rgba(79, 156, 249, .18); }
+.canvas-pop .ctx-item.danger { color: var(--err); }
+.canvas-pop .ctx-item.danger:hover:not(:disabled) { background: rgba(239, 95, 95, .13); }

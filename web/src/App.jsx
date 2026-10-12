@@ -187,7 +187,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [menu, setMenu] = useState(null) // 画布右键菜单 { x, y, flowX, flowY }
   const [showSettings, setShowSettings] = useState(false)
-  const [canvasMenu, setCanvasMenu] = useState(false) // 画布分段控件右侧的 ⋯ 菜单
+  const [canvasPop, setCanvasPop] = useState(null) // 画布控件里开着的弹层：null | 'list' | 'more'
   const [selIds, setSelIds] = useState([]) // 当前选中的节点 id（用于左上角显示尺寸）
   const [viewer, setViewer] = useState(null) // 双击数据节点打开的大图查看器
   const [viewerFit, setViewerFit] = useState(true) // 查看器：适应窗口 / 实际像素
@@ -989,22 +989,23 @@ export default function App() {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [showSettings])
 
-  // 画布 ⋯ 菜单：点到分段控件以外的地方就收起（与设置浮层同一套写法）
+  // 画布控件里的弹层（下拉列表 / ⋯ 菜单）：点到控件以外的地方、或按 Esc 就收起
+  // （与设置浮层同一套写法）
   useEffect(() => {
-    if (!canvasMenu) return
+    if (!canvasPop) return
     const onDoc = (e) => {
-      if (!(e.target instanceof Element) || !e.target.closest('.canvas-pick')) setCanvasMenu(false)
+      if (!(e.target instanceof Element) || !e.target.closest('.canvas-pick')) setCanvasPop(null)
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
-  }, [canvasMenu])
+  }, [canvasPop])
 
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
         setMenu(null)
         setShowSettings(false)
-        setCanvasMenu(false)
+        setCanvasPop(null)
         setViewer(null)
         setEditing(null)
         return
@@ -1039,6 +1040,12 @@ export default function App() {
 
   const manifests = useMemo(
     () => Object.values(state?.manifests || {}).sort((a, b) => a.id.localeCompare(b.id)),
+    [state],
+  )
+
+  // 当前画布 —— 顶栏下拉按钮上显示的就是它
+  const curCanvas = useMemo(
+    () => (state?.canvases || []).find((c) => c.id === state?.canvasId) || null,
     [state],
   )
 
@@ -1089,51 +1096,95 @@ export default function App() {
             <span className="ws-path">{state?.workspace || '选择工作目录'}</span>
           </button>
 
-          {/* 画布：一个分段控件（标签 + 下拉 + ＋ + ⋯ 共用一个边框）。
-              改名 / 删除收进 ⋯ —— 低频、且删除是破坏性的，多一层正好。 */}
+          {/* 画布：一个分段控件（标签 + 下拉 + ＋ + ✎ + ⋯ 共用一个边框）。
+              下拉是**自己画的**：原生 select 的弹层由平台渲染（Windows 上就是浅色
+              菜单），color-scheme 与 option 的样式都管不住它，弹出来是白底 +
+              我们这身浅色文字，等于白字白底。
+              删除收在 ⋯ 里 —— 低频、且是破坏性的，多一层正好。 */}
           <div className="canvas-pick" title="每个画布有自己的节点、连线与图片池">
             <span className="lbl">画布</span>
-            <select
-              value={state?.canvasId || ''}
-              onChange={(e) => switchCanvas(e.target.value)}
+            <button
+              className={`pick-btn${canvasPop === 'list' ? ' open' : ''}`}
               disabled={!state?.workspace}
               title="切换画布"
+              aria-haspopup="listbox"
+              aria-expanded={canvasPop === 'list'}
+              onClick={() => setCanvasPop((v) => (v === 'list' ? null : 'list'))}
             >
-              {(state?.canvases || []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}{c.nodeCount ? `（${c.nodeCount}）` : ''}
-                </option>
-              ))}
-            </select>
+              <span className="pick-name">
+                {curCanvas?.name || '—'}
+                {curCanvas?.nodeCount ? `（${curCanvas.nodeCount}）` : ''}
+              </span>
+              <span className="pick-caret" aria-hidden="true">
+                <svg viewBox="0 0 10 6" width="9" height="6">
+                  <path
+                    d="M1 1l4 4 4-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+            </button>
             <button className="seg-btn" title="新建一个画布" onClick={newCanvas} disabled={!state?.workspace}>
               ＋
             </button>
+            {/* 重命名跟「新建」同级 —— 新建完大概率接着就要改名，路径别差一截 */}
             <button
               className="seg-btn"
-              title="重命名 / 删除当前画布"
-              aria-label="重命名或删除当前画布"
-              onClick={() => setCanvasMenu((v) => !v)}
+              title="重命名当前画布"
+              aria-label="重命名当前画布"
+              onClick={openRenameCanvas}
+              disabled={!state?.workspace}
+            >
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                <path
+                  d="M11.6 2.7l1.7 1.7-7.6 7.6-2.3.6.6-2.3z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              className="seg-btn"
+              title="更多画布操作"
+              aria-label="更多画布操作"
+              onClick={() => setCanvasPop((v) => (v === 'more' ? null : 'more'))}
               disabled={!state?.workspace}
             >
               ⋯
             </button>
-            {canvasMenu ? (
-              <div className="canvas-menu">
-                <button
-                  className="ctx-item"
-                  onClick={() => {
-                    setCanvasMenu(false)
-                    openRenameCanvas()
-                  }}
-                >
-                  重命名画布
-                </button>
+
+            {canvasPop === 'list' ? (
+              <div className="canvas-pop">
+                {(state?.canvases || []).map((c) => (
+                  <button
+                    key={c.id}
+                    className={`ctx-item${c.id === state?.canvasId ? ' on' : ''}`}
+                    onClick={() => {
+                      setCanvasPop(null)
+                      switchCanvas(c.id)
+                    }}
+                  >
+                    {c.name}
+                    {c.nodeCount ? `（${c.nodeCount}）` : ''}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {canvasPop === 'more' ? (
+              <div className="canvas-pop more">
                 <button
                   className="ctx-item danger"
                   disabled={(state?.canvases || []).length <= 1}
                   title={(state?.canvases || []).length <= 1 ? '至少要保留一个画布' : ''}
                   onClick={() => {
-                    setCanvasMenu(false)
+                    setCanvasPop(null)
                     removeCanvas()
                   }}
                 >
