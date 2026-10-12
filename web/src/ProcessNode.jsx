@@ -41,6 +41,10 @@ export default function ProcessNode({ id, data, selected }) {
     inputs = {},
     canvasId,
     lastDuration,
+    // 「尺寸 = 自动」会落到哪个预设 —— 服务端按最后一张参考图算好下发
+    // （server/autosize.py）。必须在**生成之前**就能看到，否则要等生成完
+    // 才知道模型挑了一个完全不同的分辨率。
+    autoSize,
     onParam,
     onExecute,
     onPorts,
@@ -347,22 +351,51 @@ export default function ProcessNode({ id, data, selected }) {
             <div className="cfg">
             {others
               .filter((s) => s.type === 'enum')
-              .map((s) => (
-                <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
-                  <span className="cfg-label">{s.label || s.key}</span>
-                  <select
-                    className="nodrag nopan"
-                    value={params[s.key] ?? ''}
-                    onChange={(e) => onParam(id, s.key, e.target.value)}
+              .map((s) => {
+                const explicit = String(params[s.key] ?? '').trim()
+                // 服务端会下发「自动会落到哪个预设」（见 server/autosize.py），
+                // 但**显不显示由本地说了算** —— 参数改动走防抖 PATCH、不回灌 state，
+                // 等 /api/state 的话「选了显式尺寸提示却不消失」会卡好几秒，
+                // 反过来切回「自动」时提示也回不来。判断只依赖本地的 params。
+                const auto = autoSize && autoSize.key === s.key && !explicit ? autoSize : null
+                return (
+                  <label
+                    className={`cfg-field nodrag nopan ${widthCls(s)}${
+                      auto ? ' col' : ''
+                    }`.trim()}
+                    key={s.key}
                   >
-                    {opts(s).map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ))}
+                    <span className="cfg-row">
+                      <span className="cfg-label">{s.label || s.key}</span>
+                      <select
+                        className="nodrag nopan"
+                        value={params[s.key] ?? ''}
+                        onChange={(e) => onParam(id, s.key, e.target.value)}
+                      >
+                        {opts(s).map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                    {auto ? (
+                      <span
+                        className={`cfg-auto ${auto.source}`}
+                        title={
+                          auto.source === 'input'
+                            ? `按最后一张参考图（${auto.from || '参考图'}${
+                                auto.image ? ` · ${auto.image}` : ''
+                              } ${auto.refWidth}×${auto.refHeight}）就近选中的预设`
+                            : '没有参考图，尺寸交回模型自己决定'
+                        }
+                      >
+                        {auto.source === 'input' ? `自动 → ${auto.label}` : '自动 → 模型自选'}
+                      </span>
+                    ) : null}
+                  </label>
+                )
+              })}
 
             {others
               .filter((s) => s.type === 'number')

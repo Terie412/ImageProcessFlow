@@ -23,6 +23,7 @@ from collections import deque
 from pathlib import Path
 
 from workspace import IMAGE_EXTS, CanvasView, drop_tree
+import autosize
 import nodespec
 import registry as registry_mod
 
@@ -672,6 +673,36 @@ def execute(
         res = _resource(graph, rid)
         p = ws.image_path(res["name"]) if res else None
         inputs[port["key"]] = str(p) if p else None
+
+    # ---- 「尺寸 = 自动」在这里落地 ----
+    # 空值**不是**「不发尺寸」，而是「按最后一张参考图就近挑一个预设」，然后
+    # 当成用户**显式选的**发给脚本 —— 脚本因此完全不需要知道「自动」这回事，
+    # 它那边只有一条「有 size 就发、没有就不发」的老逻辑（见 autosize.py 的模块说明）。
+    # 同一份解析也在 /api/state 里跑（main._auto_size_hint），两处口径必须一致。
+    auto_key = autosize.auto_key(manifest)
+    if auto_key and not str(params.get(auto_key) or "").strip():
+        ref_dims: tuple[int, int] | None = None
+        ref_label: str | None = None
+        # 倒序 = 从最后一张参考图往前找，与 DashScope「多图输入取最后一张」一致
+        for port in reversed(specs):
+            p_str = inputs.get(port["key"])
+            if not p_str:
+                continue
+            dims = autosize.dims_of_path(p_str)
+            if dims:
+                ref_dims, ref_label = dims, port.get("label") or port["key"]
+                break
+        value, info = autosize.resolve(manifest, params, ref_dims)
+        if value:
+            params[auto_key] = value
+        if info:
+            if ref_dims:
+                emit(
+                    f"[尺寸] 自动 → {info['label']}"
+                    f"（依据 {ref_label} {ref_dims[0]}×{ref_dims[1]}）"
+                )
+            else:
+                emit("[尺寸] 自动 → 无参考图，交回模型自选")
 
     # ---- 临时目录 ----
     run_dir = ws.tmp_dir / uuid.uuid4().hex[:12]

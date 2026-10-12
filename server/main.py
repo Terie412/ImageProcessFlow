@@ -22,6 +22,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import autosize
 import detect as detect_mod
 import engine as engine_mod
 import nodespec
@@ -342,8 +343,57 @@ def reload_registry() -> None:
     STATE["registry"] = registry_mod.load_manifests(SCRIPTS_DIR)
 
 
+def _auto_size_hint(out: dict, proc: dict, manifest: dict) -> dict | None:
+    """给「尺寸 = 自动」的处理节点算一条界面提示：它到底会选哪个预设。
+
+    这是「自动」能被用户看见的**唯一来源** —— 否则要等生成完才发现模型挑了别的分辨率。
+
+    依据必须是**最后一张连了线的参考图**：与执行时（`engine.execute`）、
+    以及 DashScope 的官方口径（「多图输入时取最后一张」）三处一致。
+    任何一处改口径，界面显示的和真正发出去的就会是两个值。
+
+    ⚠️ 这里**不管用户当前选了什么** —— 用 `autosize.pick()` 而不是 `resolve()`。
+    显不显示是前端的事：用户在下拉里切回「自动」是纯本地操作（参数走防抖 PATCH，
+    不回灌 state），要是服务端按「用户已显式选择」就不下发，切回来那一下提示会是空的。
+
+    `out` 是 `_decorate` 里那份**已经补过宽高**的图，所以这里直接读
+    `resources[*].width/height` 即可，不用再开一次图片文件。
+    """
+    key = autosize.auto_key(manifest)
+    if key is None:
+        return None  # 这个脚本没有「自动」语义
+
+    edges = out.get("edges") or []
+    resources = out.get("resources") or []
+    ref_dims = None
+    ref = None
+    ref_port = None
+    # 倒序 = 从最后一张参考图往前找，第一个找到的就是「最后一张连了线的」
+    for port in reversed(proc.get("portSpecs") or []):
+        edge = next(
+            (e for e in edges if e.get("to") == proc["id"] and e.get("port") == port["key"]),
+            None,
+        )
+        if edge is None:
+            continue
+        r = next((x for x in resources if x["id"] == edge.get("from")), None)
+        if r is None or not r.get("width") or not r.get("height"):
+            continue
+        ref_dims = (r["width"], r["height"])
+        ref, ref_port = r, port
+        break
+
+    _value, info = autosize.pick(manifest, ref_dims)
+    if info is None:
+        return None
+    if ref is not None and ref_port is not None:
+        info["from"] = ref_port.get("label") or ref_port["key"]
+        info["image"] = ref.get("name")
+    return info
+
+
 def _decorate(g: dict, canvas_id: str | None = None) -> dict:
-    """给节点补上「算出来的」字段（图片文件信息 + **最终尺寸**）。
+    """给节点补上「算出来的」字段（图片文件信息 + **最终尺寸** + 「自动」尺寸的落点）。
 
     图片池是按画布分的，同一个短名（比如 A）在不同画布下是**不同的文件** ——
     所以这里必须带上画布 id，否则会把别的画布的 A 的尺寸显示过来。
@@ -381,12 +431,15 @@ def _decorate(g: dict, canvas_id: str | None = None) -> dict:
     for p in out["processes"]:
         m = STATE["registry"].get(p.get("defId"))
         p["w"], p["h"] = nodespec.size_of(p, kind="process", manifest=m, settings=settings)
+        # 「尺寸 = 自动」会选哪个预设 —— 生成前就显示出来（见 _auto_size_hint）
+        p["autoSize"] = None
         if m is None:
             p["portSpecs"] = []
             p["portGroups"] = []
             continue
         p["portSpecs"] = registry_mod.port_specs(m, p)
         p["portGroups"] = registry_mod.port_groups(m, p)
+        p["autoSize"] = _auto_size_hint(out, p, m)
     return out
 
 

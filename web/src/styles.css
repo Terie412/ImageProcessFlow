@@ -378,6 +378,20 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .cfg-check { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }
 .cfg-check input { accent-color: var(--accent); }
 
+/* 「尺寸 = 自动」的落点提示：挂在字段**下方**（`.col` 把它改成纵向两行），
+   这样提示不会去抢 select 的宽度 —— 挤窄了 select，「自动」两个字就被压没了 */
+.cfg-field.col { flex-direction: column; align-items: stretch; gap: 3px; }
+.cfg-field .cfg-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cfg-field .cfg-row select,
+.cfg-field .cfg-row input { flex: 1 1 auto; min-width: 0; }
+.cfg-auto {
+  font-size: 10.5px; line-height: 1.3;
+  color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 没有参考图时会退回模型自选 —— 那不是「算出来的结论」，别用强调色 */
+.cfg-auto.model { color: var(--muted); }
+
 .err-box {
   margin: 6px 10px 0 9px; padding: 6px 8px; border-radius: 6px;
   background: rgba(239,95,95,.12); border: 1px solid rgba(239,95,95,.4);

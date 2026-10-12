@@ -41,6 +41,7 @@
       "type": "enum",
       "default": "",
       "label": "尺寸",
+      "autoFrom": "input",
       "options": [
         { "value": "", "label": "自动" },
         { "value": "720x1280", "label": "720×1280" },
