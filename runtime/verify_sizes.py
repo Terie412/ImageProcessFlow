@@ -205,6 +205,16 @@ def part_b() -> None:
 
     # 切换到一次性工作目录跑，跑完恢复（和 verify_slots 一个套路）
     orig_ws = st.get("workspace")
+    # 下面的期望值（数据节点 200×180、处理节点 560×280）写的是 nodespec 的 MIN_FALLBACK。
+    # 但**下限是用户级设置**（settings.json 的 nodeMin），机器上那份可能被改过，
+    # 于是这个测试会跟着别人机器上的设置变红。所以先把下限按期望钉住，跑完再还回去。
+    #
+    # 还原必须用**原始 dict**，不能拿 `spec`（解析后的并集）去还：spec["resource"] 里
+    # 的 h 是**初始**高（220），用它 PATCH nodeMin 会把「最小」悄悄写成 220 —— 这正是
+    # settings.json 里 minH 从 180 变成 220 的由来（踩过）。
+    PIN_MIN = {"resource": {"w": 200, "h": 180}, "process": {"w": 560, "h": 280}}
+    orig_min = dict((st.get("settings") or {}).get("nodeMin") or {})
+    orig_size = dict((st.get("settings") or {}).get("nodeSize") or {})
     TMPWS.mkdir(parents=True, exist_ok=True)
     (TMPWS / "graph.json").write_text(
         json.dumps({"version": 2, "current": TMP_CANVAS["id"], "canvases": [TMP_CANVAS]},
@@ -214,6 +224,8 @@ def part_b() -> None:
     try:
         st = req("POST", "/api/workspace", {"path": str(TMPWS)})
         check("切到一次性工作目录", st.get("workspace") == str(TMPWS), str(st.get("workspace")))
+        # 把下限钉到期望值（本机设置被改过也不影响这个测试的结论）
+        st = req("PATCH", "/api/settings", {"nodeMin": PIN_MIN})
 
         spec = st["sizeSpec"]
         got = {r["id"]: (r["w"], r["h"]) for r in st["graph"]["resources"]}
@@ -239,35 +251,43 @@ def part_b() -> None:
               sorted(dirty) == ["p2", "r2", "r3"], str(sorted(dirty)))
 
         # 改「初始尺寸」：没存过的跟着变，存过的不动
-        orig_size = dict(spec["resource"])
+        size_pin = dict(orig_size.get("resource") or {"w": 200, "h": 220})
         try:
             after = req("PATCH", "/api/settings",
-                        {"nodeSize": {"resource": {"w": orig_size["w"], "h": 300}}})
+                        {"nodeSize": {"resource": {"w": size_pin["w"], "h": 300}}})
             g2 = {r["id"]: (r["w"], r["h"]) for r in after["graph"]["resources"]}
-            print(f"   初始高度 220 → 300 之后：{json.dumps(g2, ensure_ascii=False)}")
+            print(f"   初始高度 {size_pin['h']} → 300 之后：{json.dumps(g2, ensure_ascii=False)}")
             check("改 nodeSize 后 sizeSpec 跟着变", after["sizeSpec"]["resource"]["h"] == 300)
             check("没存过尺寸的节点跟着变（r1 → 300）", g2["r1"][1] == 300, str(g2["r1"]))
             check("存过尺寸的节点纹丝不动（r2 仍是 180）", g2["r2"][1] == 180, str(g2["r2"]))
         finally:
-            req("PATCH", "/api/settings", {"nodeSize": {"resource": orig_size}})
+            req("PATCH", "/api/settings", {"nodeSize": {"resource": size_pin}})
             check("初始尺寸已改回", True)
 
         # 改「最小尺寸」：存过的也得服从下限
-        orig_min = dict(spec["resource"])
+        min_pin = dict(orig_min.get("resource") or {"w": 200, "h": 180})
         try:
             after = req("PATCH", "/api/settings",
-                        {"nodeMin": {"resource": {"w": orig_min["minW"], "h": 400}}})
+                        {"nodeMin": {"resource": {"w": min_pin["w"], "h": 400}}})
             g3 = {r["id"]: (r["w"], r["h"]) for r in after["graph"]["resources"]}
             print(f"   最小高度 180 → 400 之后：{json.dumps(g3, ensure_ascii=False)}")
             check("最小尺寸兜底：r2(h=180) 被顶到 400", g3["r2"][1] == 400, str(g3["r2"]))
             check("最小尺寸兜底：r1 用初始 220 → 400", g3["r1"][1] == 400, str(g3["r1"]))
             check("sizeSpec 里的 minH 也跟着变", after["sizeSpec"]["resource"]["minH"] == 400)
         finally:
-            req("PATCH", "/api/settings", {"nodeMin": {"resource": orig_min}})
+            req("PATCH", "/api/settings", {"nodeMin": {"resource": min_pin}})
             check("最小尺寸已改回", True)
     finally:
         try:
             req("POST", "/api/workspace", {"path": orig_ws})
+        except Exception:  # noqa: BLE001
+            pass
+        # 下限是用户级设置：把跑之前那份**原样**还回去（上面钉住的是期望值）
+        try:
+            back = {k: v for k, v in orig_min.items() if k in ("resource", "process")}
+            if back:
+                req("PATCH", "/api/settings", {"nodeMin": back})
+                check("下限已还回本机原值", True)
         except Exception:  # noqa: BLE001
             pass
         shutil.rmtree(TMPWS, ignore_errors=True)
