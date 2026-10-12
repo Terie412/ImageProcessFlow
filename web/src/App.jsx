@@ -531,16 +531,22 @@ export default function App() {
     replaceRef.current?.click()
   }, [])
 
+  /* 「下载」：弹另存为并写回记忆。下完**必须拉一次状态** —— 服务端刚把
+     lastExportPath 记到节点上，而按钮显不显示看的就是它。不拉的话，用户得
+     手动刷新页面才能看到「覆盖」按钮冒出来（实测踩过）。 */
   const onExport = useCallback(
     async (id, name) => {
       try {
         const r = await api.exportImage(name, id)
-        if (r && r.ok) flash(`已保存到 ${r.saved}`)
+        if (r && r.ok) {
+          flash(`已保存到 ${r.saved}`)
+          applyState(await api.getState())
+        }
       } catch (e) {
         flash(e.message)
       }
     },
-    [flash],
+    [flash, applyState],
   )
 
   /* 「覆盖」：直接写回上次下载的路径。服务端发现记忆文件已不在时会退回另存为，
