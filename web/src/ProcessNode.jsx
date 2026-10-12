@@ -407,6 +407,9 @@ export default function ProcessNode({ id, data, selected }) {
                     type="number"
                     min={s.min}
                     max={s.max}
+                    // step 来自 manifest：小数参数（如 Alpha 的 0.05）必须声明，
+                    // 否则浏览器按默认 step=1 走，上下箭头会一步跨过整个区间
+                    step={s.step}
                     value={params[s.key] ?? ''}
                     onChange={(e) => onParam(id, s.key, e.target.value === '' ? '' : Number(e.target.value))}
                   />
