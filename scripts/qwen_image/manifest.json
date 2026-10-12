@@ -67,7 +67,7 @@
   "outputs": [{ "key": "image", "type": "image", "multi": true }],
   "_note": "最小尺寸不在这里声明 —— 它是用户级偏好，在界面的设置里调（settings.json 的 nodeMin）",
   "size": {
-    "defaultWidth": 600,
-    "defaultHeight": 340
+    "defaultWidth": 560,
+    "defaultHeight": 300
   }
 }

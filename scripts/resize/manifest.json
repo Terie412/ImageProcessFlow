@@ -41,7 +41,7 @@
   "outputs": [{ "key": "image", "type": "image", "multi": true }],
   "_note": "分辨率向量只有一份（宽/高两个数字框），所有输入图都会被拉到同一个尺寸；有几个输入口连了图就产出几张。最小尺寸不在这里声明 —— 它是用户级偏好，在界面设置里调（settings.json 的 nodeMin）。",
   "size": {
-    "defaultWidth": 560,
-    "defaultHeight": 280
+    "defaultWidth": 240,
+    "defaultHeight": 205
   }
 }

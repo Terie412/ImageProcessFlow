@@ -1,0 +1,33 @@
+{
+  "id": "recolor",
+  "name": "单色替换",
+  "entry": "recolor.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "输入图",
+      "count": 1,
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "color",
+      "type": "color",
+      "default": "#000000",
+      "label": "颜色",
+      "width": "narrow"
+    }
+  ],
+  "outputs": [{ "key": "image", "type": "image", "multi": true }],
+
+  "_note": "把图里所有像素的 RGB 统一替换成指定颜色，Alpha 原样保留（出来是目标色的剪影）。多输入逐张独立处理，几张进几张出。带 Alpha 的输出一律 PNG，不带 Alpha 的跟随原图格式。",
+  "size": {
+    "defaultWidth": 220,
+    "defaultHeight": 210
+  }
+}
