@@ -187,6 +187,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [menu, setMenu] = useState(null) // 画布右键菜单 { x, y, flowX, flowY }
   const [showSettings, setShowSettings] = useState(false)
+  const [canvasMenu, setCanvasMenu] = useState(false) // 画布分段控件右侧的 ⋯ 菜单
   const [selIds, setSelIds] = useState([]) // 当前选中的节点 id（用于左上角显示尺寸）
   const [viewer, setViewer] = useState(null) // 双击数据节点打开的大图查看器
   const [viewerFit, setViewerFit] = useState(true) // 查看器：适应窗口 / 实际像素
@@ -289,6 +290,12 @@ export default function App() {
   }, [applyState, flash, rememberViewport])
 
   const [renameDraft, setRenameDraft] = useState(null)
+
+  // 打开「重命名画布」弹窗：先把当前名字填成草稿
+  const openRenameCanvas = useCallback(() => {
+    const cur = (stateRef.current?.canvases || []).find((c) => c.id === stateRef.current?.canvasId)
+    setRenameDraft(cur?.name || '')
+  }, [])
 
   const commitRename = useCallback(async () => {
     const v = (renameDraft || '').trim()
@@ -982,11 +989,22 @@ export default function App() {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [showSettings])
 
+  // 画布 ⋯ 菜单：点到分段控件以外的地方就收起（与设置浮层同一套写法）
+  useEffect(() => {
+    if (!canvasMenu) return
+    const onDoc = (e) => {
+      if (!(e.target instanceof Element) || !e.target.closest('.canvas-pick')) setCanvasMenu(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [canvasMenu])
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
         setMenu(null)
         setShowSettings(false)
+        setCanvasMenu(false)
         setViewer(null)
         setEditing(null)
         return
@@ -1039,191 +1057,236 @@ export default function App() {
   return (
     <div className="app">
       <div className="toolbar">
+        {/* ① 身份 */}
         <div className="brand">
           Image<span>Process</span>Flow
         </div>
-        <div className="ws" title={state?.workspace || ''}>
-          {state?.workspace || '未选择工作目录'}
-        </div>
-        <button onClick={() => { setWsInput(state?.workspace || ''); setWsErr(''); setShowWs(true) }}>
-          工作目录
-        </button>
 
-        <div className="canvas-pick">
-          <span>画布</span>
-          <select
-            value={state?.canvasId || ''}
-            onChange={(e) => switchCanvas(e.target.value)}
-            disabled={!state?.workspace}
-            title="切换画布（每个画布有自己的节点、连线与图片池）"
-          >
-            {(state?.canvases || []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}{c.nodeCount ? `（${c.nodeCount}）` : ''}
-              </option>
-            ))}
-          </select>
-          <button className="icon-btn" title="新建一个画布" onClick={newCanvas} disabled={!state?.workspace}>
-            ＋
-          </button>
+        {/* ② 位置：工作目录 + 画布。
+            左半屏是「你在哪个项目、哪个画布」，右半屏是「能做什么」——
+            主次靠形态差：这两个是**有容器的控件**，右边一律是裸按钮。 */}
+        <div className="where">
+          {/* 路径本身就是按钮。原来是一个只读路径框 + 一个「工作目录」按钮，
+              两样东西办一件事、还长得一样重。 */}
           <button
-            className="icon-btn"
-            title="重命名当前画布"
-            disabled={!state?.workspace}
-            onClick={() =>
-              setRenameDraft(
-                (state?.canvases || []).find((c) => c.id === state?.canvasId)?.name || '',
-              )
-            }
+            className={`ws-chip${state?.workspace ? '' : ' empty'}`}
+            title={state?.workspace ? `${state.workspace}\n点击切换工作目录` : '点击选择一个工作目录'}
+            onClick={() => {
+              setWsInput(state?.workspace || '')
+              setWsErr('')
+              setShowWs(true)
+            }}
           >
-            改名
+            <svg className="ws-ico" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path
+                d="M2 4.6h4l1.4 1.7H14v6.3H2z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="ws-path">{state?.workspace || '选择工作目录'}</span>
           </button>
-          <button
-            className="icon-btn"
-            title="删除当前画布（连它的图片池一起）"
-            onClick={removeCanvas}
-            disabled={!state?.workspace || (state?.canvases || []).length <= 1}
-          >
-            删除
-          </button>
+
+          {/* 画布：一个分段控件（标签 + 下拉 + ＋ + ⋯ 共用一个边框）。
+              改名 / 删除收进 ⋯ —— 低频、且删除是破坏性的，多一层正好。 */}
+          <div className="canvas-pick" title="每个画布有自己的节点、连线与图片池">
+            <span className="lbl">画布</span>
+            <select
+              value={state?.canvasId || ''}
+              onChange={(e) => switchCanvas(e.target.value)}
+              disabled={!state?.workspace}
+              title="切换画布"
+            >
+              {(state?.canvases || []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.nodeCount ? `（${c.nodeCount}）` : ''}
+                </option>
+              ))}
+            </select>
+            <button className="seg-btn" title="新建一个画布" onClick={newCanvas} disabled={!state?.workspace}>
+              ＋
+            </button>
+            <button
+              className="seg-btn"
+              title="重命名 / 删除当前画布"
+              aria-label="重命名或删除当前画布"
+              onClick={() => setCanvasMenu((v) => !v)}
+              disabled={!state?.workspace}
+            >
+              ⋯
+            </button>
+            {canvasMenu ? (
+              <div className="canvas-menu">
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    setCanvasMenu(false)
+                    openRenameCanvas()
+                  }}
+                >
+                  重命名画布
+                </button>
+                <button
+                  className="ctx-item danger"
+                  disabled={(state?.canvases || []).length <= 1}
+                  title={(state?.canvases || []).length <= 1 ? '至少要保留一个画布' : ''}
+                  onClick={() => {
+                    setCanvasMenu(false)
+                    removeCanvas()
+                  }}
+                >
+                  删除画布
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="spacer" />
 
-        <button onClick={() => importRef.current?.click()} disabled={!state?.workspace}>
-          ＋ 导入图片
-        </button>
-        <button onClick={reloadScripts}>重新加载脚本</button>
-        <button
-          onClick={() => setLogOpen(true)}
-          disabled={!drawer}
-          title="查看最近一次执行的日志"
-        >
-          执行日志{drawer?.status === 'running' ? '（进行中…）' : ''}
-        </button>
-
-        <div className="settings-wrap">
-          <button
-            className="icon-btn"
-            title="设置"
-            aria-label="设置"
-            onClick={toggleSettings}
-          >
-            ⚙
+        {/* ③ 动作：幽灵按钮（无边框，悬停才显形），只强调「导入图片」。
+            整组包一层 —— 窗口窄到折行时它们一起挪到第二行，不会被拆成两半。 */}
+        <div className="tb-actions">
+          <button className="tb-act" onClick={() => importRef.current?.click()} disabled={!state?.workspace}>
+            ＋ 导入图片
           </button>
-          {showSettings ? (
-            <div className="settings-pop">
-              <label className="set-row">
-                <input
-                  type="checkbox"
-                  checked={state?.settings?.confirmDeleteDataNode !== false}
-                  onChange={(e) => saveSetting('confirmDeleteDataNode', e.target.checked)}
-                />
-                <span>删除数据节点前弹出确认</span>
-              </label>
+          <button className="tb-ghost" onClick={reloadScripts}>
+            重新加载脚本
+          </button>
+          <button
+            className="tb-ghost"
+            onClick={() => setLogOpen(true)}
+            disabled={!drawer}
+            title="查看最近一次执行的日志"
+          >
+            执行日志{drawer?.status === 'running' ? '（进行中…）' : ''}
+          </button>
 
-              <div className="set-sep" />
-              <div className="set-group">提示词润色（DeepSeek）</div>
-              <label className="set-field">
-                <span>API Key 的环境变量名</span>
-                <input
-                  type="text"
-                  defaultValue={state?.settings?.textModelKeyEnv ?? ''}
-                  placeholder="DEEPSEEK_API_KEY"
-                  onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim()
-                    if (v !== (state?.settings?.textModelKeyEnv ?? '')) saveSetting('textModelKeyEnv', v)
-                  }}
-                />
-              </label>
-              <label className="set-field">
-                <span>模型</span>
-                <input
-                  type="text"
-                  defaultValue={state?.settings?.textModelName ?? ''}
-                  placeholder="deepseek-v4-flash-vision-exp"
-                  onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim()
-                    if (v !== (state?.settings?.textModelName ?? '')) saveSetting('textModelName', v)
-                  }}
-                />
-              </label>
-
-              <div className="set-sep" />
-              <div className="set-group">网格吸附</div>
-              <label className="set-row">
-                <input
-                  type="checkbox"
-                  checked={!!state?.settings?.snapToGrid}
-                  onChange={(e) => saveSetting('snapToGrid', e.target.checked)}
-                />
-                <span>拖动节点时吸附到网格</span>
-              </label>
-              <label className="set-field">
-                <span>网格大小</span>
-                <div className="set-size">
+          <div className="settings-wrap">
+            <button
+              className="icon-btn"
+              title="设置"
+              aria-label="设置"
+              onClick={toggleSettings}
+            >
+              ⚙
+            </button>
+            {showSettings ? (
+              <div className="settings-pop">
+                <label className="set-row">
                   <input
-                    type="number"
-                    min={GRID_RANGE[0]}
-                    max={GRID_RANGE[1]}
-                    step={1}
-                    value={gridDraft ?? gridSize}
-                    onChange={(e) => setGridDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                    onBlur={(e) => commitGrid(e.target.value)}
+                    type="checkbox"
+                    checked={state?.settings?.confirmDeleteDataNode !== false}
+                    onChange={(e) => saveSetting('confirmDeleteDataNode', e.target.checked)}
                   />
-                  <span className="set-x">px</span>
-                </div>
-              </label>
+                  <span>删除数据节点前弹出确认</span>
+                </label>
 
-              <div className="set-sep" />
-              <div className="set-group">节点尺寸</div>
-              <div className="set-head">
-                <span>类型</span>
-                <span>初始</span>
-                <span>最小</span>
-              </div>
-              {sizeRows(state).map((row) => {
-                const eff = specOf(state, row.key)
-                const val = (f) => sizeDraft?.[row.key]?.[f] ?? eff[f]
-                const edit = (f, raw) =>
-                  setSizeDraft((d) => ({
-                    ...(d || {}),
-                    [row.key]: { ...eff, ...(d?.[row.key] || {}), [f]: raw },
-                  }))
-                return (
-                  // 每行两组：初始（w×h）与最小（w×h）。数字的权威在服务端 ——
-                  // 这里只负责把用户输入的草稿发出去，回来的是被夹过的值
-                  <div className="set-field set-sizes" key={row.key}>
-                    <span className="set-name" title={row.label}>
-                      {row.label}
-                    </span>
-                    {[['w', 'h'], ['minW', 'minH']].map((pair) => (
-                      <div className="set-size" key={pair[0]}>
-                        {pair.map((f, i) => (
-                          <React.Fragment key={f}>
-                            {i ? <span className="set-x">×</span> : null}
-                            <input
-                              type="number"
-                              min={state?.sizeRange?.[0]}
-                              max={state?.sizeRange?.[1]}
-                              step={10}
-                              value={val(f)}
-                              onChange={(e) => edit(f, e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                              onBlur={() => commitSize(row.key)}
-                            />
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    ))}
+                <div className="set-sep" />
+                <div className="set-group">提示词润色（DeepSeek）</div>
+                <label className="set-field">
+                  <span>API Key 的环境变量名</span>
+                  <input
+                    type="text"
+                    defaultValue={state?.settings?.textModelKeyEnv ?? ''}
+                    placeholder="DEEPSEEK_API_KEY"
+                    onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim()
+                      if (v !== (state?.settings?.textModelKeyEnv ?? '')) saveSetting('textModelKeyEnv', v)
+                    }}
+                  />
+                </label>
+                <label className="set-field">
+                  <span>模型</span>
+                  <input
+                    type="text"
+                    defaultValue={state?.settings?.textModelName ?? ''}
+                    placeholder="deepseek-v4-flash-vision-exp"
+                    onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim()
+                      if (v !== (state?.settings?.textModelName ?? '')) saveSetting('textModelName', v)
+                    }}
+                  />
+                </label>
+
+                <div className="set-sep" />
+                <div className="set-group">网格吸附</div>
+                <label className="set-row">
+                  <input
+                    type="checkbox"
+                    checked={!!state?.settings?.snapToGrid}
+                    onChange={(e) => saveSetting('snapToGrid', e.target.checked)}
+                  />
+                  <span>拖动节点时吸附到网格</span>
+                </label>
+                <label className="set-field">
+                  <span>网格大小</span>
+                  <div className="set-size">
+                    <input
+                      type="number"
+                      min={GRID_RANGE[0]}
+                      max={GRID_RANGE[1]}
+                      step={1}
+                      value={gridDraft ?? gridSize}
+                      onChange={(e) => setGridDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                      onBlur={(e) => commitGrid(e.target.value)}
+                    />
+                    <span className="set-x">px</span>
                   </div>
-                )
-              })}
-            </div>
-          ) : null}
+                </label>
+
+                <div className="set-sep" />
+                <div className="set-group">节点尺寸</div>
+                <div className="set-head">
+                  <span>类型</span>
+                  <span>初始</span>
+                  <span>最小</span>
+                </div>
+                {sizeRows(state).map((row) => {
+                  const eff = specOf(state, row.key)
+                  const val = (f) => sizeDraft?.[row.key]?.[f] ?? eff[f]
+                  const edit = (f, raw) =>
+                    setSizeDraft((d) => ({
+                      ...(d || {}),
+                      [row.key]: { ...eff, ...(d?.[row.key] || {}), [f]: raw },
+                    }))
+                  return (
+                    // 每行两组：初始（w×h）与最小（w×h）。数字的权威在服务端 ——
+                    // 这里只负责把用户输入的草稿发出去，回来的是被夹过的值
+                    <div className="set-field set-sizes" key={row.key}>
+                      <span className="set-name" title={row.label}>
+                        {row.label}
+                      </span>
+                      {[['w', 'h'], ['minW', 'minH']].map((pair) => (
+                        <div className="set-size" key={pair[0]}>
+                          {pair.map((f, i) => (
+                            <React.Fragment key={f}>
+                              {i ? <span className="set-x">×</span> : null}
+                              <input
+                                type="number"
+                                min={state?.sizeRange?.[0]}
+                                max={state?.sizeRange?.[1]}
+                                step={10}
+                                value={val(f)}
+                                onChange={(e) => edit(f, e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                                onBlur={() => commitSize(row.key)}
+                              />
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 

@@ -166,7 +166,7 @@ async function main() {
     // ---- 1. 打开设置浮层 ----
     console.log('\n[1] 点顶栏齿轮（应弹出设置浮层，复选框默认勾选）')
     check('浮层初始是关闭的', (await menuOpen()) === false)
-    await clickSel('.toolbar .icon-btn')
+    await clickSel('.settings-wrap .icon-btn')
     check('浮层已打开', (await menuOpen()) === true)
     check('复选框初始为勾选', (await checkboxChecked()) === true)
     check('服务端初始值为 true', (await serverFlag()) === true)
@@ -196,7 +196,7 @@ async function main() {
 
     // ---- 4. 重新勾上 ----
     console.log('\n[4] 重新勾选（应回到 true）')
-    await clickSel('.toolbar .icon-btn')
+    await clickSel('.settings-wrap .icon-btn')
     await clickSel('.settings-pop .set-row input')
     await sleep(400)
     check('复选框已勾上', (await checkboxChecked()) === true)
@@ -219,7 +219,7 @@ async function main() {
 
     // ---- 6. 浮层截图 ----
     console.log('\n[6] 截图设置浮层')
-    await clickSel('.toolbar .icon-btn')
+    await clickSel('.settings-wrap .icon-btn')
     await sleep(500)
     const shot = await send('Page.captureScreenshot', { format: 'png' })
     const { writeFileSync } = await import('node:fs')

@@ -261,7 +261,7 @@ async function main() {
     console.log('\n[5] 设置浮层里改最小尺寸（真实输入）')
     await click(0, 0) // 先点空白关掉可能开着的浮层
     const gear = await J(`(() => {
-      const b = document.querySelector('.toolbar .icon-btn').getBoundingClientRect()
+      const b = document.querySelector('.settings-wrap .icon-btn').getBoundingClientRect()
       return JSON.stringify({ x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) })
     })()`)
     await click(gear.x, gear.y)

@@ -6,6 +6,8 @@ import { CHROME, ROOT, RUNTIME } from './_common.js'
 const PORT = 9222
 const URL_ = process.argv[2] || 'http://127.0.0.1:8770'
 const OUT = process.argv[3] || `${RUNTIME}/shot.png`
+// SHOT_W / SHOT_H：换个视口宽度截图（看顶栏在窄窗口下怎么折行）
+const WIN = `${process.env.SHOT_W || 1680},${process.env.SHOT_H || 1050}`
 
 const chrome = spawn(
   CHROME,
@@ -14,7 +16,7 @@ const chrome = spawn(
     '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${RUNTIME}/chrome-profile`,
-    '--window-size=1680,1050',
+    `--window-size=${WIN}`,
     'about:blank',
   ],
   { stdio: 'ignore' },
@@ -109,6 +111,26 @@ async function main() {
         })()`),
       )
     }
+  }
+
+  // SHOT_CLICK=<选择器>：截图前先点一下它（派真实鼠标事件，React 的 onClick 才认）。
+  // 逗号分隔可以点一串，例如先点开菜单、再点里面那一项。
+  for (const sel of (process.env.SHOT_CLICK || '').split(',').filter(Boolean)) {
+    const p = await evalJs(`(() => {
+      const b = document.querySelector(${JSON.stringify(sel)})
+      if (!b) return ''
+      const r = b.getBoundingClientRect()
+      return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) })
+    })()`)
+    if (!p) {
+      console.log(`SHOT_CLICK: 找不到 ${sel}`)
+      break
+    }
+    const { x, y } = JSON.parse(p)
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
+    await sleep(60)
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 })
+    await sleep(400)
   }
 
   // SHOT_SETTINGS=1：点开顶栏齿轮，截图设置浮层

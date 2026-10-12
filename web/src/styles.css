@@ -35,28 +35,79 @@ body {
 
 .app { display: flex; flex-direction: column; height: 100%; }
 
-/* ---------------- 顶栏 ---------------- */
+/* ---------------- 顶栏 ----------------
+   三段：身份 / 位置 / 动作。**主次靠形态差，不靠把它们排成一条线**：
+     ① 身份 —— 一个小色块 + 文字，右边一条竖线把它和控件隔开
+     ② 位置 —— 两个「有容器」的控件（工作目录、画布），挨在一起
+     ③ 动作 —— 幽灵按钮（无边框，悬停才显形）+ 唯一被强调的「导入图片」
+   有容器的重、裸按钮的轻，视线先落在「我在哪个目录、哪个画布」上。
+   高度统一 30px，免得三档控件各自差一两个像素、看着就乱。 */
 .toolbar {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 14px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
-  flex-wrap: wrap;
+  flex-wrap: wrap; row-gap: 7px;
 }
-.toolbar .brand { font-weight: 600; letter-spacing: .3px; margin-right: 6px; }
+.toolbar .brand {
+  display: flex; align-items: center; gap: 7px;
+  flex: 0 0 auto;
+  padding-right: 11px;
+  border-right: 1px solid var(--line);
+  font-weight: 600; letter-spacing: .3px;
+}
 .toolbar .brand span { color: var(--accent); }
-.toolbar .ws {
-  color: var(--muted); font-size: 12px;
-  max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px;
+/* 小色块当标记 —— 纯 CSS，不引图、也不指望字体里有那个字形 */
+.toolbar .brand::before {
+  content: ''; width: 9px; height: 9px; border-radius: 3px;
+  background: linear-gradient(135deg, var(--accent), #58d3b0);
+  box-shadow: 0 0 0 3px rgba(79, 156, 249, .13);
 }
-.toolbar .spacer { flex: 1; }
-.toolbar .icon-btn { padding: 4px 9px; font-size: 15px; line-height: 1.35; color: var(--muted); }
-.toolbar .icon-btn:hover:not(:disabled) { color: var(--text); }
+.toolbar .spacer { flex: 1 1 auto; }
+
+/* 位置区：两个容器成组 —— 组内紧（6px）、组外松（顶栏 8px） */
+.toolbar .where { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+
+/* 工作目录：**路径本身就是按钮**，点它换目录（原来是一个只读路径框 + 一个
+   「工作目录」按钮，两样东西办一件事、还长得一样重）。
+   窄的时候它先被压 —— 首尾都留着省略号，右边的画布控件不动。 */
+.ws-chip {
+  display: flex; align-items: center; gap: 6px;
+  flex: 0 1 auto; min-width: 0; max-width: 330px;
+  height: 30px; padding: 0 10px;
+  font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+}
+.ws-chip .ws-ico { flex: 0 0 auto; color: var(--muted); transition: color .12s; }
+.ws-chip:hover:not(:disabled) .ws-ico { color: var(--accent); }
+.ws-chip .ws-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ws-chip.empty { background: transparent; border-style: dashed; color: var(--muted); }
+
+/* 右侧动作：整组一层，窗口窄到折行时一起挪走，不会被拆成两半 */
+.toolbar .tb-actions { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; flex-wrap: wrap; }
+.toolbar .tb-act,
+.toolbar .tb-ghost {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; padding: 0 11px; flex: 0 0 auto;
+}
+.tb-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.tb-ghost:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+/* 唯一被强调的动作：往画布上添东西（空画布上它就是唯一的下一步）。
+   右边多留 4px —— 它自己带边框，跟幽灵按钮之间得比 8px 稍宽才不显得挤 */
+.tb-act { background: rgba(79, 156, 249, .13); border-color: rgba(79, 156, 249, .4); color: #a5cdfd; font-weight: 500; margin-right: 4px; }
+.tb-act:hover:not(:disabled) { background: rgba(79, 156, 249, .22); border-color: var(--accent); color: #d6e8ff; }
 
 /* 设置浮层 */
-.settings-wrap { position: relative; }
+.settings-wrap { position: relative; flex: 0 0 auto; }
+/* 齿轮：跟幽灵按钮同一档，只是它只有图标 */
+.settings-wrap .icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; padding: 0 9px;
+  font-size: 15px; line-height: 1.35; color: var(--muted);
+  background: transparent; border-color: transparent;
+}
+.settings-wrap .icon-btn:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line); color: var(--text); }
 .settings-pop {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 45;
   min-width: 390px; padding: 6px;
@@ -733,15 +784,37 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   border-color: #9cc8fb;
 }
 
-/* ---------------- 顶栏的画布选择器 ---------------- */
-.canvas-pick { display: flex; align-items: center; gap: 4px; }
-.canvas-pick > span { color: var(--muted); font-size: 11.5px; }
+/* ---------------- 顶栏的画布选择器 ----------------
+   一个**分段控件**：标签 + 下拉 + ＋ + ⋯ 共用一个边框，段内只剩 3px 的缝 ——
+   读起来是「一个」控件，而不是三个跟旁边一样重的裸按钮。 */
+.canvas-pick {
+  display: flex; align-items: center; gap: 3px;
+  flex: 0 0 auto; position: relative;
+  height: 30px; padding: 0 3px 0 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+}
+.canvas-pick > .lbl { color: var(--muted); font-size: 11.5px; margin-right: 4px; }
 .canvas-pick select {
   font: inherit; font-size: 12px; color: var(--text);
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 6px; padding: 4px 6px; max-width: 190px;
-  cursor: pointer;
+  background: transparent; border: none; outline: none; cursor: pointer;
+  height: 24px; padding: 0 2px 0 0; max-width: 180px;
 }
-.canvas-pick select:hover:not(:disabled) { border-color: #4a5563; }
-.canvas-pick select:focus { border-color: var(--accent); outline: none; }
-.canvas-pick .icon-btn { padding: 4px 7px; font-size: 12px; }
+.canvas-pick select:disabled { color: var(--muted); }
+.canvas-pick .seg-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; flex: 0 0 auto;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer;
+}
+.canvas-pick .seg-btn:hover:not(:disabled) { background: #333945; border-color: #414956; color: var(--text); }
+
+/* ⋯ 里的菜单（重命名 / 删除）—— 与设置浮层同一套外形 */
+.canvas-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 45;
+  min-width: 118px; padding: 3px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
+}
+.canvas-menu .ctx-item { font-size: 11.5px; padding: 4px 8px; }
+.canvas-menu .ctx-item.danger { color: var(--err); }
+.canvas-menu .ctx-item.danger:hover:not(:disabled) { background: rgba(239, 95, 95, .13); }
