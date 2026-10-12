@@ -815,6 +815,40 @@ def api_pick_workspace():
     return state_payload()
 
 
+def _export_remember_path(node: dict | None) -> str:
+    """取这个数据节点记住的上次下载路径；没记过返回空串。
+
+    记忆**只有一个字段** `lastExportPath`（完整路径，含文件名）—— 早期版本只记目录
+    (`lastExportDir`)，那会儿前端拿不到完整路径，也就没法做「覆盖」。两套字段并存
+    会导致「旧代码写了目录、新前端只认路径」这种看不见的空档，所以目录字段已删除。
+    """
+    return ((node or {}).get("lastExportPath") or "").strip()
+
+
+def _export_save_as(
+    node: dict | None, remembered: str, src: Path, fallback_dir: Path
+) -> str | None:
+    """弹另存为，写回记忆。返回落点；用户取消返回 None。
+
+    对话框的初始目录优先落在记忆路径的父目录，其次工作目录根；初始文件名带上记忆里
+    的文件名 —— 用户可能把下载出去的那份改过名，再点「下载」时默认回到那个名字。
+    """
+    mem_dir = Path(remembered).parent if remembered else None
+    initial_dir = str(mem_dir) if (mem_dir and mem_dir.is_dir()) else str(fallback_dir)
+    initial_file = Path(remembered).name if remembered else src.name
+    try:
+        dest = _tk_save_as(initial_dir, initial_file or src.name)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"无法打开系统对话框：{e}") from e
+    if not dest:
+        return None
+    shutil.copy2(src, dest)
+    if node is not None:
+        node["lastExportPath"] = str(dest)
+        persist()
+    return dest
+
+
 @app.post("/api/workspace/export")
 def api_export(payload: dict):
     """把当前画布里的一张图复制到用户指定的位置（UI 上叫「下载」）。
@@ -828,28 +862,13 @@ def api_export(payload: dict):
     body = payload or {}
     name = body.get("name", "")
     resource_id = body.get("resource_id", "")
-    w = ws()
     src = view().image_path(name)
     if src is None:
         raise HTTPException(404, f"图片不存在: {name}")
     node = engine_mod._resource(graph(), resource_id) if resource_id else None  # noqa: SLF001
-    # 记忆优先用完整路径的父目录；老的（只有 lastExportDir 的）记录仍能定位目录
-    remembered = (node or {}).get("lastExportPath") or (node or {}).get("lastExportDir") or ""
-    last_dir = str(Path(remembered).parent) if remembered else ""
-    initial_dir = last_dir if (node is not None and Path(last_dir).is_dir()) else str(w.root)
-    # 记忆里的文件名也带上：用户可能把下载的副本改过名，再点下载时默认回到那个名字
-    initial_file = Path(remembered).name if remembered else src.name
-    try:
-        dest = _tk_save_as(initial_dir, initial_file or src.name)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, f"无法打开系统对话框：{e}") from e
-    if not dest:
+    dest = _export_save_as(node, _export_remember_path(node), src, ws().root)
+    if dest is None:
         return {"cancelled": True}
-    shutil.copy2(src, dest)
-    if node is not None:
-        node["lastExportPath"] = str(dest)
-        node["lastExportDir"] = str(Path(dest).parent)  # 兼容旧字段
-        persist()
     return {"ok": True, "saved": dest, "modified": False}
 
 
@@ -868,31 +887,17 @@ def api_overwrite(payload: dict):
     body = payload or {}
     name = body.get("name", "")
     resource_id = body.get("resource_id", "")
-    w = ws()
     src = view().image_path(name)
     if src is None:
         raise HTTPException(404, f"图片不存在: {name}")
     node = engine_mod._resource(graph(), resource_id) if resource_id else None  # noqa: SLF001
-    remembered = (node or {}).get("lastExportPath") or ""
+    remembered = _export_remember_path(node)
 
-    # 记忆失效（没记过 / 文件被删被移）→ 按「下载」走另存为
+    # 记忆失效（没记过 / 文件被删被移 / 外置盘拔了）→ 按「下载」走另存为
     if not remembered or not Path(remembered).is_file():
-        remembered_dir = (node or {}).get("lastExportDir") or ""
-        initial_dir = (
-            remembered_dir if (node is not None and Path(remembered_dir).is_dir()) else str(w.root)
-        )
-        initial_file = Path(remembered).name if remembered else src.name
-        try:
-            dest = _tk_save_as(initial_dir, initial_file or src.name)
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(500, f"无法打开系统对话框：{e}") from e
-        if not dest:
+        dest = _export_save_as(node, remembered, src, ws().root)
+        if dest is None:
             return {"cancelled": True}
-        shutil.copy2(src, dest)
-        if node is not None:
-            node["lastExportPath"] = str(dest)
-            node["lastExportDir"] = str(Path(dest).parent)
-            persist()
         return {"ok": True, "saved": dest, "modified": True}
 
     dest = Path(remembered)
