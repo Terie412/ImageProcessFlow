@@ -59,7 +59,7 @@ body {
 .settings-wrap { position: relative; }
 .settings-pop {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 45;
-  min-width: 286px; padding: 6px;
+  min-width: 390px; padding: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
 }
@@ -88,6 +88,24 @@ body {
 .settings-pop .set-size { display: flex; align-items: center; gap: 6px; }
 .settings-pop .set-size input { width: 72px; padding: 4px 6px; }
 .settings-pop .set-x { color: var(--muted); font-size: 11px; }
+
+/* 「节点尺寸」表：一列类型 + 两列（初始 / 最小），值来自服务端的 sizeSpec。
+   两列表头与下面的两组合计宽度同为 110px，所以能对齐。 */
+.settings-pop .set-head {
+  display: grid; grid-template-columns: 1fr 110px 110px; gap: 8px;
+  padding: 2px 9px 3px; color: var(--muted); font-size: 11px; letter-spacing: .3px;
+}
+.settings-pop .set-head span:not(:first-child) { text-align: center; }
+.settings-pop .set-field.set-sizes {
+  display: grid; grid-template-columns: 1fr 110px 110px; gap: 8px;
+  align-items: center; padding: 3px 9px 4px;
+}
+.settings-pop .set-field.set-sizes > .set-name {
+  color: var(--text); font-size: 11.5px; margin-bottom: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.settings-pop .set-sizes .set-size { gap: 5px; }
+.settings-pop .set-sizes .set-size input { width: 46px; padding: 4px 5px; }
 
 button {
   font: inherit; color: var(--text);
@@ -349,6 +367,12 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .cfg-field select:focus,
 .cfg-field input:focus { border-color: var(--accent); }
+/* 原生取色控件（单色替换节点的「颜色」参数）：压掉浏览器默认的肥边距 */
+.cfg-field input.cfg-color {
+  flex: 0 0 auto;
+  width: 38px; height: 24px; padding: 2px;
+  cursor: pointer;
+}
 /* 开关组：整体作为一个可折行的单元，不会把某一项单独甩到下一行 */
 .cfg-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; flex: 0 1 auto; }
 .cfg-check { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }
@@ -412,7 +436,8 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   border-radius: 5px;
   cursor: pointer;
 }
-.ctx-item:hover { background: var(--panel-2); }
+.ctx-item:hover:not(:disabled) { background: var(--panel-2); }
+.ctx-item:disabled { color: #5b626c; cursor: default; }
 .ctx-sep { height: 1px; margin: 3px 3px; background: var(--line); }
 
 /* ---------------- 遮罩 ---------------- */

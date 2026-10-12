@@ -18,19 +18,31 @@ import { anchorZoom, enableMiddleDragPan, wheelZoom } from './zoom'
 
 const nodeTypes = { resource: ResourceNode, process: ProcessNode }
 
-// 节点尺寸：graph 里没记 w/h 时用这里的默认值。
-// 用户拖右下角改过之后，尺寸会写进 graph.json。
-// 「最小尺寸」不在这里定死 —— 它由设置里的 nodeMin 决定（界面 ⚙ 里可调），
-// 这两个常量只是设置缺失时的最后兜底。
-const RESOURCE_SIZE = { w: 250, h: 280, minW: 200, minH: 180 }
-const PROCESS_SIZE = { w: 600, h: 340, minW: 560, minH: 280 }
+/* 节点尺寸：**所有数字都来自服务端**，前端一个都不自己写。
+ *
+ * 唯一的事实来源是 `server/nodespec.py`，随 /api/state 下发三样：
+ *   - graph 里每个节点的 `w` / `h` —— 服务端算好的**最终渲染尺寸**
+ *   - `sizeSpec`                   —— 每个已知类型的 {w,h,minW,minH}（初始 / 最小）
+ *   - `sizeRange`                  —— 宽高的允许区间（表单的 min/max 用）
+ *
+ * 为什么不在前端自己算：这里原有一份 `RESOURCE_SIZE` / `PROCESS_SIZE`，和服务端
+ * `engine.py` 的那份漂移了 —— 数据节点没被拖过尺寸时，前端按 220 渲染、服务端按
+ * 280 排输出槽位，于是每两个槽位之间空出 70px 的假缝。现在前端只查表。
+ */
+function specOf(state, key) {
+  const sp = state?.sizeSpec
+  if (!sp) return null
+  return sp[key] || (String(key).startsWith('process:') ? sp.process : sp.resource) || null
+}
 
-// 最小尺寸的允许区间（与服务端 NODE_MIN_RANGE 保持一致）
-const MIN_RANGE = [80, 4000]
-const clampMin = (v) => {
-  const n = Number(v)
-  if (!Number.isFinite(n) || n <= 0) return null
-  return Math.max(MIN_RANGE[0], Math.min(MIN_RANGE[1], Math.round(n)))
+/* 设置浮层里要列出的行：数据节点 + 每个已注册的处理节点类型。
+   一律以服务端下发的 sizeSpec 为准 —— 那边没有的类型就不列。 */
+function sizeRows(state) {
+  const mans = Object.values(state?.manifests || {}).sort((a, b) => a.id.localeCompare(b.id))
+  return [
+    { key: 'resource', label: '数据节点' },
+    ...mans.map((m) => ({ key: `process:${m.id}`, label: m.name || m.id })),
+  ].filter((r) => specOf(state, r.key))
 }
 
 // 网格吸附：格子大小的允许区间与服务端 engine.GRID_SIZE_RANGE 保持一致
@@ -43,29 +55,12 @@ const clampGrid = (v) => {
 }
 
 /*
- * 最小尺寸按「具体节点类型」存，不是按大类：
- *   nodeMin.resource          → 数据节点
- *   nodeMin["process:<defId>"]→ 某个具体的处理节点类型（如 qwen_image）
- *   nodeMin.process           → 处理节点的兜底（新类型还没有自己的条目时用它）
+ * 尺寸规格按「具体节点类型」索引，与服务端的 `settings.nodeSize` / `settings.nodeMin`
+ * 完全同一套 key（`resource` / `process:<defId>` / `process` 兜底）：
+ *   初始尺寸 nodeSize → 节点没被拖过右下角手柄时该多大
+ *   最小尺寸 nodeMin  → 拖手柄时的下限
+ * 具体取哪一条、怎么兜底，都在服务端 `nodespec.py` 里做完了，前端只查 `sizeSpec`。
  */
-function minSizeOf(state, key, dflt) {
-  const nm = state?.settings?.nodeMin || {}
-  const spec = nm[key] || (key.startsWith('process:') ? nm.process : null) || {}
-  return { w: clampMin(spec.w) ?? dflt.w, h: clampMin(spec.h) ?? dflt.h }
-}
-
-// 设置浮层里要列出的行：数据节点 + 每个已注册的处理节点类型
-function minRows(state) {
-  const mans = Object.values(state?.manifests || {}).sort((a, b) => a.id.localeCompare(b.id))
-  return [
-    { key: 'resource', label: '数据节点', dflt: { w: RESOURCE_SIZE.minW, h: RESOURCE_SIZE.minH } },
-    ...mans.map((m) => ({
-      key: `process:${m.id}`,
-      label: m.name || m.id,
-      dflt: { w: PROCESS_SIZE.minW, h: PROCESS_SIZE.minH },
-    })),
-  ]
-}
 
 const EDGE_STYLE = { stroke: '#4f9cf9' }
 const EDGE_MARKER = { type: MarkerType.ArrowClosed, color: '#4f9cf9', width: 18, height: 18 }
@@ -107,36 +102,44 @@ function buildNodes(state, cbs) {
     portMap[e.to][e.port] = resById[e.from] || null
   }
 
-  const rmin = minSizeOf(state, 'resource', RESOURCE_SIZE)
-
   return [
-    ...state.graph.resources.map((r) => ({
-      id: r.id,
-      type: 'resource',
-      position: { x: r.x ?? 0, y: r.y ?? 0 },
-      // 尺寸走 React Flow 的顶层 width/height。
-      // 注意数据节点里 data.width/height 是「图片像素分辨率」，别搞混。
-      width: Math.max(rmin.w, r.w ?? RESOURCE_SIZE.w),
-      height: Math.max(rmin.h, r.h ?? RESOURCE_SIZE.h),
-      data: { ...r, canvasId: state.canvasId, minW: rmin.w, minH: rmin.h, ...cbs },
-    })),
+    ...state.graph.resources.map((r) => {
+      const spec = specOf(state, 'resource')
+      return {
+        id: r.id,
+        type: 'resource',
+        position: { x: r.x ?? 0, y: r.y ?? 0 },
+        // 尺寸走 React Flow 的顶层 width/height。注意数据节点里 data.width/height
+        // 是「图片像素分辨率」，别搞混 —— 节点尺寸是 `w`/`h`，由服务端按
+        // nodespec 算好下发（max(最小尺寸, 存的 ?? 初始尺寸)）。
+        width: r.w,
+        height: r.h,
+        data: {
+          ...r,
+          canvasId: state.canvasId,
+          // 拖手柄时的下限；拿不到规格就退化成当前尺寸（总比 0 强）
+          minW: spec?.minW ?? r.w,
+          minH: spec?.minH ?? r.h,
+          ...cbs,
+        },
+      }
+    }),
     ...state.graph.processes.map((p) => {
-      const sz = state.manifests?.[p.defId]?.size || {}
-      const pmin = minSizeOf(state, `process:${p.defId}`, PROCESS_SIZE)
+      const spec = specOf(state, `process:${p.defId}`)
       return {
         id: p.id,
         type: 'process',
         position: { x: p.x ?? 0, y: p.y ?? 0 },
-        // 存过的尺寸可能小于设置里的最小值，这里兜一下
-        width: Math.max(pmin.w, p.w ?? sz.defaultWidth ?? PROCESS_SIZE.w),
-        height: Math.max(pmin.h, p.h ?? sz.defaultHeight ?? PROCESS_SIZE.h),
+        // 同上：`w`/`h` 是服务端算好的最终尺寸
+        width: p.w,
+        height: p.h,
         data: {
           ...p,
           canvasId: state.canvasId,
           manifest: state.manifests?.[p.defId],
           inputs: portMap[p.id] || {},
-          minW: pmin.w,
-          minH: pmin.h,
+          minW: spec?.minW ?? p.w,
+          minH: spec?.minH ?? p.h,
           ...cbs,
         },
       }
@@ -745,8 +748,8 @@ export default function App() {
   const addProcess = useCallback(
     async (defId, x, y) => {
       try {
-        // 让节点大致以点击位置为中心落下（宽度按该节点类型的默认宽度算）
-        const w = stateRef.current?.manifests?.[defId]?.size?.defaultWidth ?? PROCESS_SIZE.w
+        // 让节点大致以点击位置为中心落下（宽度按服务端下发的初始尺寸算）
+        const w = specOf(stateRef.current, `process:${defId}`)?.w ?? 0
         applyState(await api.createProcess(defId, x - w / 2, y - 24))
       } catch (e) {
         flash(e.message)
@@ -836,12 +839,35 @@ export default function App() {
     }
   }, [applyState, flash])
 
+  // 整张画布重新排版：分层列布局，处理节点 / 输出节点 / 输入图全都重排
+  // （和「重排输出节点」的区别：那个只动输出节点，不看节点之间的关系）
+  const formatAll = useCallback(async () => {
+    try {
+      const s = await api.formatAll()
+      applyState(s)
+      flash(s.moved ? `已重新排版，移动了 ${s.moved} 个节点` : '节点位置已经排好了，没有需要移动的')
+    } catch (e) {
+      flash(e.message)
+    }
+  }, [applyState, flash])
+
+  const undoFormat = useCallback(async () => {
+    try {
+      const s = await api.undoFormat()
+      applyState(s)
+      flash(`已还原 ${s.restored} 个节点的位置`)
+    } catch (e) {
+      flash(e.message)
+    }
+  }, [applyState, flash])
+
   const saveSetting = useCallback(
     async (key, value) => {
       try {
         const s = await api.updateSettings({ [key]: value })
-        // 最小尺寸会影响节点渲染（渲染时按它兜底），所以要重建画布而不只是换 state
-        if (key === 'nodeMin') applyState(s)
+        // 尺寸设置会改变节点渲染（初始尺寸 / 最小尺寸都参与），所以要重建画布
+        // 而不只是换 state —— 改完当场重排，不用刷新
+        if (key === 'nodeSize' || key === 'nodeMin') applyState(s)
         else setState(s)
       } catch (e) {
         flash(e.message)
@@ -850,8 +876,9 @@ export default function App() {
     [applyState, flash],
   )
 
-  /* ---- 设置浮层里的「节点最小尺寸」：本地草稿（按具体节点类型分组），失焦时才提交 ---- */
-  const [minDraft, setMinDraft] = useState(null)
+  /* ---- 设置浮层里的「节点尺寸」：本地草稿（一行 = 一个节点类型，含初始/最小两组），
+     失焦时才提交 ---- */
+  const [sizeDraft, setSizeDraft] = useState(null)
 
   /* ---- 网格吸附：格大小也是一个失焦才提交的草稿；格点尺寸给 ReactFlow 用 ---- */
   const [gridDraft, setGridDraft] = useState(null)
@@ -870,33 +897,50 @@ export default function App() {
   const toggleSettings = useCallback(() => {
     // 打开时清空草稿：输入框会直接显示服务端的当前值
     if (!showSettings) {
-      setMinDraft({})
+      setSizeDraft({})
       setGridDraft(null)
     }
     setShowSettings((v) => !v)
   }, [showSettings])
 
-  const commitMin = useCallback(
+  /* 尺寸草稿 → 提交。一次失焦只改一个字段，所以最多发出一个请求：
+     改「初始」发 nodeSize、改「最小」发 nodeMin（服务端负责与当前值合并）。
+     没改的那一组不发 —— 否则每次失焦都要重建一遍画布。 */
+  const commitSize = useCallback(
     (key) => {
-      const d = minDraft?.[key]
+      const d = sizeDraft?.[key]
       if (!d) return
-      const w = clampMin(d.w)
-      const h = clampMin(d.h)
-      if (w === null || h === null) {
-        // 输入不合法（例如清空了）→ 丢掉草稿，输入框退回显示服务端的当前值
-        setMinDraft((s) => {
+      const eff = specOf(state, key) || {}
+      // 只接受正数；清空 / 乱填一律丢掉草稿，输入框退回显示服务端的值。
+      // 区间由服务端夹（nodespec.SIZE_RANGE），前端不重复一份数字。
+      const num = (v) => {
+        const n = Number(v)
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+      }
+      const group = (a, b) => {
+        const w = num(d[a] ?? eff[a])
+        const h = num(d[b] ?? eff[b])
+        return w === null || h === null ? null : { w, h }
+      }
+      const size = group('w', 'h')
+      const mins = group('minW', 'minH')
+      if (!size || !mins) {
+        setSizeDraft((s) => {
           const next = { ...(s || {}) }
           delete next[key]
           return next
         })
         return
       }
-      const next = { w, h }
-      setMinDraft((s) => ({ ...(s || {}), [key]: next }))
-      // 只发这一个 key，服务端会与当前值合并
-      saveSetting('nodeMin', { [key]: next })
+      setSizeDraft((s) => {
+        const next = { ...(s || {}) }
+        delete next[key] // 清掉草稿 → 输入框显示服务端（夹过）的值
+        return next
+      })
+      if (size.w !== eff.w || size.h !== eff.h) saveSetting('nodeSize', { [key]: size })
+      if (mins.w !== eff.minW || mins.h !== eff.minH) saveSetting('nodeMin', { [key]: mins })
     },
-    [minDraft, saveSetting],
+    [sizeDraft, state, saveSetting],
   )
 
   const chooseWorkspace = useCallback(async () => {
@@ -1146,40 +1190,47 @@ export default function App() {
               </label>
 
               <div className="set-sep" />
-              <div className="set-group">节点最小尺寸</div>
-              {minRows(state).map((row) => {
-                const eff = minSizeOf(state, row.key, row.dflt)
-                const val = (axis) => minDraft?.[row.key]?.[axis] ?? eff[axis]
+              <div className="set-group">节点尺寸</div>
+              <div className="set-head">
+                <span>类型</span>
+                <span>初始</span>
+                <span>最小</span>
+              </div>
+              {sizeRows(state).map((row) => {
+                const eff = specOf(state, row.key)
+                const val = (f) => sizeDraft?.[row.key]?.[f] ?? eff[f]
+                const edit = (f, raw) =>
+                  setSizeDraft((d) => ({
+                    ...(d || {}),
+                    [row.key]: { ...eff, ...(d?.[row.key] || {}), [f]: raw },
+                  }))
                 return (
-                  <label className="set-field" key={row.key}>
-                    <span>{row.label}</span>
-                    <div className="set-size">
-                      {['w', 'h'].map((axis, i) => (
-                        <React.Fragment key={axis}>
-                          {i ? <span className="set-x">×</span> : null}
-                          <input
-                            type="number"
-                            min={MIN_RANGE[0]}
-                            max={MIN_RANGE[1]}
-                            step={10}
-                            value={val(axis)}
-                            onChange={(e) =>
-                              setMinDraft((d) => ({
-                                ...(d || {}),
-                                [row.key]: {
-                                  w: d?.[row.key]?.w ?? eff.w,
-                                  h: d?.[row.key]?.h ?? eff.h,
-                                  [axis]: e.target.value,
-                                },
-                              }))
-                            }
-                            onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                            onBlur={() => commitMin(row.key)}
-                          />
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  </label>
+                  // 每行两组：初始（w×h）与最小（w×h）。数字的权威在服务端 ——
+                  // 这里只负责把用户输入的草稿发出去，回来的是被夹过的值
+                  <div className="set-field set-sizes" key={row.key}>
+                    <span className="set-name" title={row.label}>
+                      {row.label}
+                    </span>
+                    {[['w', 'h'], ['minW', 'minH']].map((pair) => (
+                      <div className="set-size" key={pair[0]}>
+                        {pair.map((f, i) => (
+                          <React.Fragment key={f}>
+                            {i ? <span className="set-x">×</span> : null}
+                            <input
+                              type="number"
+                              min={state?.sizeRange?.[0]}
+                              max={state?.sizeRange?.[1]}
+                              step={10}
+                              value={val(f)}
+                              onChange={(e) => edit(f, e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                              onBlur={() => commitSize(row.key)}
+                            />
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 )
               })}
             </div>
@@ -1317,6 +1368,30 @@ export default function App() {
               }}
             >
               重排输出节点
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => {
+                formatAll()
+                setMenu(null)
+              }}
+            >
+              格式化所有节点
+            </button>
+            <button
+              className="ctx-item"
+              disabled={!state?.canUndoFormat}
+              title={
+                state?.canUndoFormat
+                  ? '把节点放回格式化之前的位置（连点几次格式化也一次退回）'
+                  : '这个画布还没有格式化过'
+              }
+              onClick={() => {
+                undoFormat()
+                setMenu(null)
+              }}
+            >
+              撤销格式化
             </button>
           </div>
         ) : null}

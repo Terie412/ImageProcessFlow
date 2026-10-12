@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 import detect as detect_mod
 import engine as engine_mod
+import nodespec
 import polish as polish_mod
 import registry as registry_mod
 from workspace import IMAGE_EXTS, CanvasView, Workspace, drop_tree
@@ -59,11 +60,17 @@ DEFAULT_SETTINGS: dict = {
     "snapToGrid": True,
     # 吸附格大小（px）
     "gridSize": 5,
-    # 每种节点的最小尺寸（画布坐标），按**具体节点类型**分：
-    #   resource              → 数据节点
-    #   process:<defId>       → 某个具体的处理节点类型（如 process:qwen_image）
-    #   process               → 处理节点的兜底值（某类型还没有自己的条目时用它）
+    # 节点尺寸：**唯一一份**配置，见 server/nodespec.py。
+    # 两个表形状一致，key 都是 resource / process:<defId> / process：
+    #   nodeSize → **初始尺寸**（节点没被拖过右下角手柄时该多大）
+    #   nodeMin  → **最小尺寸**（拖手柄时的下限）
     # 放在设置里而不是 manifest 里：这是用户的个人偏好，不是脚本的属性。
+    # 注意 nodeSize 里**不写**各处理节点类型的条目 —— 那些由 manifest.size 声明
+    # （脚本作者最清楚自己的节点该多大），写在这里等于多养一份会漂移的副本。
+    "nodeSize": {
+        "resource": {"w": 200, "h": 220},
+        "process": {"w": 600, "h": 340},
+    },
     "nodeMin": {
         "resource": {"w": 200, "h": 180},
         "process": {"w": 560, "h": 280},
@@ -72,14 +79,16 @@ DEFAULT_SETTINGS: dict = {
         "process:qwen_image": {"w": 560, "h": 280},
         "process:resize": {"w": 180, "h": 180},
         "process:square_pad": {"w": 280, "h": 280},
+        "process:recolor": {"w": 220, "h": 210},
     },
 }
 
-# 最小尺寸的合理区间，防止填 0 或天文数字把节点搞没
-NODE_MIN_RANGE = (80, 4000)
+# 尺寸的合理区间，防止填 0 或天文数字把节点搞没。
+# 唯一的定义在 nodespec.SIZE_RANGE（随 /api/state 的 sizeRange 下发给前端）。
+NODE_SIZE_RANGE = nodespec.SIZE_RANGE
 
 
-def _valid_node_min_key(k: str) -> bool:
+def _valid_size_key(k: str) -> bool:
     if k in ("resource", "process"):
         return True
     if not k.startswith("process:"):
@@ -88,17 +97,17 @@ def _valid_node_min_key(k: str) -> bool:
     return 0 < len(tail) <= 64 and "/" not in tail and ":" not in tail
 
 
-def _coerce_node_min(value, current: dict) -> dict | None:
-    """校验 nodeMin：只认已知的 key，宽高取整并夹到合理区间。
+def _coerce_size_map(value, current: dict, dflt: dict) -> dict | None:
+    """校验 nodeSize / nodeMin：只认已知的 key，宽高取整并夹到合理区间。
 
     某个 `process:<defId>` 传 `null` 表示**删掉这一项**（回到通用 `process` 兜底）。
     `resource` / `process` 这两个基准项不允许删。
     """
     if not isinstance(value, dict):
         return None
-    out = {k: dict(v) for k, v in (current or DEFAULT_SETTINGS["nodeMin"]).items()}
+    out = {k: dict(v) for k, v in (current or dflt).items()}
     for kind, spec in value.items():
-        if not _valid_node_min_key(kind):
+        if not _valid_size_key(kind):
             continue
         if spec is None:
             if kind.startswith("process:"):
@@ -106,7 +115,7 @@ def _coerce_node_min(value, current: dict) -> dict | None:
             continue
         if not isinstance(spec, dict):
             continue
-        spec_out = dict(out.get(kind) or DEFAULT_SETTINGS["nodeMin"]["process"])
+        spec_out = dict(out.get(kind) or dflt["process"])
         for axis in ("w", "h"):
             if spec.get(axis) is None:
                 continue
@@ -114,15 +123,15 @@ def _coerce_node_min(value, current: dict) -> dict | None:
                 n = int(round(float(spec[axis])))
             except (TypeError, ValueError):
                 continue
-            spec_out[axis] = max(NODE_MIN_RANGE[0], min(NODE_MIN_RANGE[1], n))
+            spec_out[axis] = max(NODE_SIZE_RANGE[0], min(NODE_SIZE_RANGE[1], n))
         out[kind] = spec_out
     return out
 
 
 def _coerce_setting(key: str, value, current: dict):
     """校验/规范化一个设置项；不合法返回 None（调用方跳过这一项）。"""
-    if key == "nodeMin":
-        return _coerce_node_min(value, current.get("nodeMin"))
+    if key in ("nodeSize", "nodeMin"):
+        return _coerce_size_map(value, current.get(key), DEFAULT_SETTINGS[key])
     if key == "gridSize":
         # 允许 "5" / 5 / 5.0 这类写法，取整后夹到合理区间 —— 0 会让吸附退化成空操作
         try:
@@ -334,12 +343,18 @@ def reload_registry() -> None:
 
 
 def _decorate(g: dict, canvas_id: str | None = None) -> dict:
-    """给数据节点补上图片文件信息（供前端做缓存失效）。
+    """给节点补上「算出来的」字段（图片文件信息 + **最终尺寸**）。
 
     图片池是按画布分的，同一个短名（比如 A）在不同画布下是**不同的文件** ——
     所以这里必须带上画布 id，否则会把别的画布的 A 的尺寸显示过来。
+
+    **尺寸的口径只在 `nodespec.size_of()` 里有一份**：这里把每个节点的最终尺寸
+    落到 `w` / `h` 上（`max(最小尺寸, 存的 ?? 初始尺寸)`），前端 `buildNodes` 直接
+    用它渲染，不再自己推算 —— 原先前端 `App.jsx` 和服务端各算一遍，实测两边对
+    「数据节点没存过高时算多高」给出的答案是 220 与 280，输出槽位就是这么被摆歪的。
     """
     w = STATE["workspace"]
+    settings = STATE["settings"]
     out = json.loads(json.dumps(g))
     for r in out["resources"]:
         r["hasImage"] = False
@@ -361,9 +376,11 @@ def _decorate(g: dict, canvas_id: str | None = None) -> dict:
                             r["format"] = (im.format or "").upper() or None
                     except Exception:  # noqa: BLE001
                         pass
+        r["w"], r["h"] = nodespec.size_of(r, kind="resource", settings=settings)
 
     for p in out["processes"]:
         m = STATE["registry"].get(p.get("defId"))
+        p["w"], p["h"] = nodespec.size_of(p, kind="process", manifest=m, settings=settings)
         if m is None:
             p["portSpecs"] = []
             p["portGroups"] = []
@@ -382,7 +399,13 @@ def state_payload() -> dict:
         "canvasId": d["current"],
         "canvases": canvas_list(d),
         "graph": _decorate(graph(), d["current"]),
+        # 这个画布还有没有「格式化所有节点」可撤销（右键菜单据此置灰那一项）
+        "canUndoFormat": d["current"] in FMT_UNDO,
         "manifests": {k: registry_mod.public_manifest(v) for k, v in STATE["registry"].items()},
+        # 节点尺寸的唯一读取入口：每个已知类型的 {w,h,minW,minH}（见 nodespec）
+        "sizeSpec": nodespec.resolve_types(STATE["registry"], STATE["settings"]),
+        # 宽高的允许区间，前端表单的 min/max 直接用它，不再自己写
+        "sizeRange": list(nodespec.SIZE_RANGE),
         "settings": dict(STATE["settings"]),
     }
 
@@ -1140,6 +1163,51 @@ def api_tidy():
         persist()
     print(f"[画布] 重排输出节点：移动了 {n} 个")
     return state_payload()
+
+
+# 「格式化所有节点」的撤销快照：**每个画布一份**，一直留到被撤销为止。
+# 放内存里不落盘 —— 重启就没了，但重启之后画布还在，只是撤不回上一次格式化，
+# 这个代价可以接受（坐标本身已经写进 graph.json 了）。
+FMT_UNDO: dict[str, list[dict]] = {}
+
+
+@app.post("/api/format")
+def api_format():
+    """整张画布重新排版（分层列布局，见 DESIGN.md §3.11）。
+
+    动的是**所有**节点的坐标，所以顺手记一份快照供「撤销格式化」用。
+
+    快照用 `setdefault` —— **只要没撤销过就一直留着，不会被后面的格式化冲掉**。
+    这样「连点两次格式化 → 撤销」是回到**最初**的排布（而不是回到上一次格式化的
+    结果，那等于什么都没撤销）。
+    """
+    with LOCK:
+        g = graph()
+        cid = canvas()["id"]
+        before = engine_mod.snapshot_positions(g)
+        n = engine_mod.format_all(g, STATE["registry"], STATE["settings"])
+        FMT_UNDO.setdefault(cid, before)
+        persist()
+    print(f"[画布] 格式化所有节点：移动了 {n} 个")
+    payload = state_payload()
+    payload["moved"] = n
+    return payload
+
+
+@app.post("/api/format/undo")
+def api_format_undo():
+    """把画布坐标还原到格式化之前（**只能用一次**，用完就得重新格式化才有）。"""
+    with LOCK:
+        cid = canvas()["id"]
+        snap = FMT_UNDO.pop(cid, None)
+        if not snap:
+            raise HTTPException(400, "没有可撤销的格式化（每个画布只留最近一次，重启后也清空）")
+        n = engine_mod.restore_positions(graph(), snap)
+        persist()
+    print(f"[画布] 撤销格式化：还原了 {n} 个")
+    payload = state_payload()
+    payload["restored"] = n
+    return payload
 
 
 @app.patch("/api/positions")

@@ -48,6 +48,9 @@ export const exportImage = (name, resourceId) =>
 export const createProcess = (defId, x, y) => post('/api/processes', { defId, x, y })
 export const updateProcess = (id, payload) => patch(`/api/processes/${id}`, payload)
 export const tidyOutputs = () => post('/api/tidy')
+// 整图重新排版 / 撤销（撤销每个画布只能用一次）
+export const formatAll = () => post('/api/format')
+export const undoFormat = () => post('/api/format/undo')
 export const deletePort = (id, portKey) =>
   fetch(`/api/processes/${id}/ports/${portKey}`, { method: 'DELETE' }).then(J)
 export const savePositions = (items) => patch('/api/positions', items)

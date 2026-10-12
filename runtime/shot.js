@@ -114,7 +114,7 @@ async function main() {
   // SHOT_SETTINGS=1：点开顶栏齿轮，截图设置浮层
   if (process.env.SHOT_SETTINGS) {
     const p = await evalJs(`(() => {
-      const b = document.querySelector('.toolbar .icon-btn')
+      const b = document.querySelector('.settings-wrap .icon-btn')
       if (!b) return ''
       const r = b.getBoundingClientRect()
       return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) })

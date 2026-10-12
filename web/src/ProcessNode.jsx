@@ -48,8 +48,10 @@ export default function ProcessNode({ id, data, selected }) {
     onPolish,
     onDetect,
     onEditRegions,
-    minW = 320,
-    minH = 280,
+    // 拖手柄时的下限：一律由 App.buildNodes 从服务端的 sizeSpec 带下来，
+    // 这里**不留兜底数字** —— 曾经有一份 320×280 从这里和服务端漂移过
+    minW,
+    minH,
     onResizeStart,
   } = data
 
@@ -377,6 +379,24 @@ export default function ProcessNode({ id, data, selected }) {
                   />
                 </label>
               ))}
+
+            {others
+              .filter((s) => s.type === 'color')
+              .map((s) => {
+                // 原生取色控件只认 #RRGGBB；历史值不合法时兜成黑，别让 React 报警
+                const val = /^#[0-9a-fA-F]{6}$/.test(params[s.key] || '') ? params[s.key] : '#000000'
+                return (
+                  <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
+                    <span className="cfg-label">{s.label || s.key}</span>
+                    <input
+                      className="nodrag nopan cfg-color"
+                      type="color"
+                      value={val}
+                      onChange={(e) => onParam(id, s.key, e.target.value)}
+                    />
+                  </label>
+                )
+              })}
 
             {others.some((s) => s.type === 'bool') ? (
               <div className="cfg-checks">

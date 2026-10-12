@@ -19,20 +19,23 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 from workspace import IMAGE_EXTS, CanvasView, drop_tree
+import nodespec
 import registry as registry_mod
 
 RUN_TIMEOUT_SEC = 900
 
 # 输出槽位落点：**按节点实际尺寸推算**，不能写死偏移量。
 # 早期写死 380/210，那是按 280 宽的处理节点算的；节点一旦被调大（默认已到 600 宽、
-# 数据节点 280 高），输出节点就会横向压住上游、纵向互相压。
+# 数据节点 220 高），输出节点就会横向压住上游、纵向互相压。
 # 纵向的间距同样不能写死 —— 见 `resource_height()`：必须按**数据节点的实际渲染高**
 # 逐个累加，否则用户把数据节点调矮之后，每两个节点之间会空出一大截。
-PROCESS_DEFAULT_W = 600      # 与前端 PROCESS_SIZE.w 一致
-RESOURCE_DEFAULT_H = 280     # 与前端 RESOURCE_SIZE.h 一致
+#
+# ⚠️ 尺寸常量（默认宽高、最小宽高）**不在这里** —— 见 `nodespec.py`：
+# 那是全项目唯一一份，前端也是从 /api/state 读同一份解析结果。
 SLOT_GAP_X = 64              # 输出节点与处理节点之间的横向留白
 SLOT_GAP_Y = 10              # 相邻输出槽位之间的纵向留白（用户手动排布时用的就是这个量级）
 
@@ -44,31 +47,27 @@ def _as_float(v, dflt: float = 0.0) -> float:
         return dflt
 
 
-def _node_min(settings: dict | None, key: str, dflt: tuple[float, float]) -> tuple[float, float]:
-    """读设置里的最小尺寸；处理节点没有专属条目时退回通用的 `process`。"""
-    nm = (settings or {}).get("nodeMin") or {}
-    spec = nm.get(key)
-    if not isinstance(spec, dict):
-        spec = nm.get("process") if key.startswith("process:") else None
-    if not isinstance(spec, dict):
-        return dflt
-    return (
-        _as_float(spec.get("w")) or dflt[0],
-        _as_float(spec.get("h")) or dflt[1],
-    )
+def resource_size(r: dict | None, settings: dict | None) -> tuple[float, float]:
+    """数据节点的**实际渲染尺寸** `(w, h)`。口径见 `nodespec.size_of()`。"""
+    return nodespec.size_of(r, kind="resource", settings=settings)
+
+
+def process_size(
+    proc: dict | None, manifest: dict | None, settings: dict | None
+) -> tuple[float, float]:
+    """处理节点的**实际渲染尺寸** `(w, h)`。口径见 `nodespec.size_of()`。"""
+    return nodespec.size_of(proc, kind="process", manifest=manifest, settings=settings)
 
 
 def resource_height(r: dict | None, settings: dict | None) -> float:
     """数据节点的**实际渲染高度**。
 
-    必须和前端 App.jsx 的算法保持一致：`max(设置里的下限, 存的 h ?? RESOURCE_SIZE.h)`
-    —— 存的 h 是用户拖右下角改过的大小，没存过才用默认 280。
-
-    这个值决定相邻输出槽位的纵向间距。**不能写死 280**：用户把数据节点调矮（例如
-    180）之后，还按 280 排就会在每个节点之间空出一大截（310 - 180 = 130）。
+    前端按同一个数渲染（`/api/state` 下发的 `w`/`h` 就是这么算的），所以这里
+    直接复用 `nodespec.size_of()`，不再自己写 `max(下限, 存的 h ?? 默认)` ——
+    那段公式曾经在前后端各写一份，两边的默认值不一样（220 / 280），
+    输出槽位间距因此比屏幕上看到的宽了 70px。
     """
-    min_h = _node_min(settings, "resource", (0.0, RESOURCE_DEFAULT_H))[1]
-    return max(min_h, _as_float((r or {}).get("h")) or RESOURCE_DEFAULT_H)
+    return resource_size(r, settings)[1]
 
 
 def slot_origin(proc: dict, manifest: dict, settings: dict | None) -> tuple[float, float]:
@@ -80,14 +79,7 @@ def slot_origin(proc: dict, manifest: dict, settings: dict | None) -> tuple[floa
     吸附开着时用**向上**吸附：横向的 `+SLOT_GAP_X`、纵向的 `+SLOT_GAP_Y`
     都是下限，就近吸附会把它们啃掉几个像素。
     """
-    min_w, _ = _node_min(
-        settings, f"process:{proc.get('defId')}", (PROCESS_DEFAULT_W, RESOURCE_DEFAULT_H)
-    )
-    sz = manifest.get("size") or {}
-    proc_w = max(
-        min_w,
-        _as_float(proc.get("w")) or _as_float(sz.get("defaultWidth")) or PROCESS_DEFAULT_W,
-    )
+    proc_w, _ = process_size(proc, manifest, settings)
     g = grid_size(settings)
     return (
         snap_up(proc.get("x", 0) + proc_w + SLOT_GAP_X, g),
@@ -193,6 +185,344 @@ def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
                 r["x"], r["y"] = base_x, y
                 moved += 1
             y = snap_up(y + resource_height(r, settings) + SLOT_GAP_Y, g)
+    return moved
+
+
+# --------------------------------------------------------------------------
+# 整图自动布局（画布右键 →「格式化所有节点」/「撤销格式化」）
+# --------------------------------------------------------------------------
+# 与「重排输出节点」的区别：那个只把输出数据节点摆到自己处理节点的右侧，
+# 完全不看处理节点之间、处理节点与上游之间的关系；这个是**整张图重新排版**。
+COL_GAP_X = SLOT_GAP_X        # 列间距：沿用输出节点那 64px 的横向留白，观感一致
+ROW_GAP_Y = 20                # 列内相邻节点的纵向留白（比 SLOT_GAP_Y=10 松一点：
+                              # 整图重排后上下相邻的往往不是同一组输出，10 会显得糊在一起）
+COMPONENT_GAP_Y = 80          # 互不相连的分量之间的空隙
+LAYOUT_SWEEPS = 2             # 重心法迭代轮数（每轮 = 一次下行 + 一次上行）
+
+
+class _FmtNode:
+    """排版时用的节点快照：显存大小、种类，以及一个「兄弟组」的归属。
+
+    `gid` 用来把**同一个处理节点的多个输出**绑成一组 —— 它们在列内必须
+    连排、且按槽位序号从上到下，不然重执行之后就认不出谁是谁了。
+    """
+
+    __slots__ = ("id", "node", "kind", "w", "h", "gid", "index")
+
+    def __init__(self, node: dict, kind: str, w: float, h: float):
+        self.id = node["id"]
+        self.node = node
+        self.kind = kind
+        self.w = w
+        self.h = h
+        self.index = _as_float(node.get("index"), 0.0) if kind == "resource" else 0.0
+        if kind == "resource" and node.get("producer"):
+            self.gid = f"out:{node['producer']}"
+        else:
+            self.gid = f"self:{node['id']}"
+
+
+def _fmt_collect(graph: dict, registry: dict, settings: dict | None) -> dict[str, _FmtNode]:
+    """收集所有节点 + 它们的**实际尺寸**（口径同 §3.5.1，前端按同一个数渲染）。"""
+    out: dict[str, _FmtNode] = {}
+    for r in graph.get("resources", []):
+        w, h = nodespec.size_of(r, kind="resource", settings=settings)
+        out[r["id"]] = _FmtNode(r, "resource", w, h)
+    for p in graph.get("processes", []):
+        m = (registry or {}).get(p.get("defId"))
+        w, h = nodespec.size_of(p, kind="process", manifest=m, settings=settings)
+        out[p["id"]] = _FmtNode(p, "process", w, h)
+    return out
+
+
+def _fmt_links(items: dict[str, _FmtNode], graph: dict) -> tuple[dict, dict]:
+    """前驱 / 后继。
+
+    两类边：画布上的显式连线（数据节点 → 处理节点），以及处理节点 → 它产出的
+    输出数据节点（"隐式边"，前端也是这么画的）。合起来就是这张图的真实依赖。
+    """
+    succ: dict[str, list[str]] = {i: [] for i in items}
+    pred: dict[str, list[str]] = {i: [] for i in items}
+    for e in graph.get("edges", []):
+        a, b = e.get("from"), e.get("to")
+        if a in items and b in items:
+            succ[a].append(b)
+            pred[b].append(a)
+    for r in graph.get("resources", []):
+        pid = r.get("producer")
+        if pid in items and r["id"] in items:
+            succ[pid].append(r["id"])
+            pred[r["id"]].append(pid)
+    return succ, pred
+
+
+def _fmt_layers(ids: list[str], succ: dict, pred: dict) -> dict[str, int]:
+    """分层：`层(v) = 1 + max(层(前驱))`，没有前驱就是第 0 层（最长路径分层）。
+
+    这样每条边都从第 L 列指向第 L' 列且 L' > L（永远向右），输出节点也自然紧贴
+    在自己处理节点的右边一列。做法是 Kahn 拓扑排序，顺带算最长路径。
+    万一有环（设计上禁止，见 §2.2.3），剩下的节点留在第 0 层 —— 难看但不会死循环。
+    """
+    idset = set(ids)
+    indeg = {i: sum(1 for p in pred[i] if p in idset) for i in ids}
+    layer = {i: 0 for i in ids}
+    queue = deque([i for i in ids if indeg[i] == 0])
+    while queue:
+        i = queue.popleft()
+        for j in succ[i]:
+            if j not in indeg:
+                continue
+            if layer[i] + 1 > layer[j]:
+                layer[j] = layer[i] + 1
+            indeg[j] -= 1
+            if indeg[j] == 0:
+                queue.append(j)
+    return layer
+
+
+def _fmt_components(ids: list[str], succ: dict, pred: dict) -> list[list[str]]:
+    """弱连通分量：互不相连的几张子图分开摆，别混在同一列里。"""
+    seen: set[str] = set()
+    out: list[list[str]] = []
+    for start in ids:
+        if start in seen:
+            continue
+        seen.add(start)
+        stack = [start]
+        comp: list[str] = []
+        while stack:
+            v = stack.pop()
+            comp.append(v)
+            for nb in (*succ[v], *pred[v]):
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        out.append(comp)
+    return out
+
+
+def _fmt_center(i: str, items: dict[str, _FmtNode], ys: dict[str, float]) -> float:
+    return ys[i] + items[i].h / 2.0
+
+
+def _fmt_reorder(
+    col: list[str], nbrs: dict, items: dict[str, _FmtNode], ys: dict[str, float]
+) -> list[str]:
+    """列内排序：按上游（或下游）节点的重心排，**同组输出绑在一起不可拆散**。
+
+    没有可参考邻居的组（比如只在上行阶段、又没有后继的处理节点）就以自己当前的
+    中心当键 —— 相当于待在原地，不会因为「没邻居」被甩到列首或列尾。
+    """
+    groups: dict[str, list[str]] = {}
+    for i in col:
+        groups.setdefault(items[i].gid, []).append(i)
+
+    ranked: list[tuple[float, list[str]]] = []
+    for members in groups.values():
+        # 同一处理节点的输出：严格按槽位序号（重执行后靠序号重新绑定，见 §2.2.1 R4）
+        members.sort(key=lambda i: (items[i].index, items[i].id))
+        centers = []
+        for i in members:
+            nb = [j for j in nbrs[i] if j in ys]
+            centers.append(
+                sum(_fmt_center(j, items, ys) for j in nb) / len(nb) if nb else None
+            )
+        known = [c for c in centers if c is not None]
+        key = (
+            sum(known) / len(known)
+            if known
+            else sum(_fmt_center(i, items, ys) for i in members) / len(members)
+        )
+        ranked.append((key, members))
+    ranked.sort(key=lambda t: t[0])   # 稳定排序：键相同时保持上一轮的相对次序
+    return [i for _, ms in ranked for i in ms]
+
+
+def _fmt_place(
+    col: list[str],
+    items: dict[str, _FmtNode],
+    ys: dict[str, float],
+    desired,
+    g: float,
+    snap: bool,
+) -> None:
+    """把一列的节点落位：**每个"组"从锚点往下挂**。
+
+    「组」= 同一个处理节点的输出（`gid` 相同）；组内按"上一个的底 + `ROW_GAP_Y`"
+    等距往下排，**组的起点 = 它的期望位置**（对输出块来说就是处理节点自己的顶边，
+    于是输出块从处理节点的顶边开始往下排，与 `slot_origin` / 「重排输出节点」一致）。
+
+    组起点还受"间距下限"约束：压到上一组时往后让（`max(期望, 游标)`）—— 间距只会
+    变大不会变小，所以同列永不重叠。这一条是必要的：一列里常常混着别的处理节点的
+    输出，整列共用一个锚点的话，第二组就会被前一组的高度顺延出去（实测差 20px）。
+
+    `snap=True` 时每个落点**向上**吸到格点（§3.10：程序算出来的布局先把吸附满足掉，
+    间距只大不小）。
+    """
+    prev: str | None = None
+    cursor: float | None = None
+    prev_gid: str | None = None
+    for i in col:
+        gid = items[i].gid
+        if prev is None:                       # 列首：直接落在它的期望位置
+            y = desired(i)
+        elif gid == prev_gid:                  # 同组：跟着上一个往下，保持组内等距
+            y = ys[prev] + items[prev].h + ROW_GAP_Y
+        else:                                  # 换组：可以顶到自己的期望位置
+            y = max(desired(i), cursor)
+        if snap:
+            y = snap_up(y, g)
+        ys[i] = y
+        cursor = y + items[i].h + ROW_GAP_Y
+        if snap:
+            cursor = snap_up(cursor, g)
+        prev, prev_gid = i, gid
+
+
+def _fmt_layout_component(
+    comp: list[str],
+    items: dict[str, _FmtNode],
+    succ: dict,
+    pred: dict,
+    y0: dict[str, float],
+    g: float,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """给一个连通分量排版，返回 `({id: 列起点 x}, {id: y})`（分量内坐标）。
+
+    两阶段：先用**不带吸附**的几何值迭代排序（只为决定上下次序），再走一遍带吸附的
+    落位。分开做是因为「排序看的是相对关系、落位要满足格点」，混在一起会让每轮迭代
+    的键都带上取整噪声。
+    """
+    layer = _fmt_layers(comp, succ, pred)
+    cols: dict[int, list[str]] = {}
+    for i in comp:
+        cols.setdefault(layer[i], []).append(i)
+
+    # ---- 阶段 1：排序（用当前 y 当种子，等于"先尊重用户现在的上下关系"）----
+    ys = dict(y0)
+    base = min(y0[i] for i in comp)
+
+    def want(i: str, ymap: dict[str, float]) -> float:
+        """节点想待在哪儿：**跟它的上游的「顶」对齐**。
+
+        - 处理节点的输出、单输入的节点：跟着那个上游的顶 → 链条拉成一条水平线。
+        - **多输入**的节点（例如 5 路图一起进）跟**最上面那个输入**走，而不是取
+          所有输入的均值。取均值的话每级都会往下漂半块 —— 实测同一张画布，
+          跟最上面那个是 1892 高，取均值是 3310 高（见 §3.11）。
+          代价是其余几路输入连进来的线是斜的（向上收拢）。
+        - 源节点（没有上游）保留它原来的相对高低。
+        """
+        ps = [p for p in pred[i] if p in ymap]
+        if not ps:
+            return y0[i] - base
+        return min(ymap[p] for p in ps)
+
+    for _ in range(LAYOUT_SWEEPS):
+        for L in sorted(cols):                                    # 下行：看上游
+            cols[L] = _fmt_reorder(cols[L], pred, items, ys)
+            _fmt_place(cols[L], items, ys, lambda i: want(i, ys), g, snap=False)
+        for L in reversed(sorted(cols)):                          # 上行：看下游
+            cols[L] = _fmt_reorder(cols[L], succ, items, ys)
+            _fmt_place(cols[L], items, ys, lambda i: want(i, ys), g, snap=False)
+
+    # ---- 阶段 2：正式落位（列起点 + 列内 y 都吸到格点）----
+    colx: dict[str, float] = {}
+    x = 0.0
+    for L in sorted(cols):
+        for i in cols[L]:
+            colx[i] = x
+        x = snap_up(x + max(items[i].w for i in cols[L]) + COL_GAP_X, g)
+
+    placed: dict[str, float] = {}
+    for L in sorted(cols):
+        _fmt_place(cols[L], items, placed, lambda i: want(i, placed), g, snap=True)
+    return colx, placed
+
+
+def format_all(graph: dict, registry: dict, settings: dict | None) -> int:
+    """把整张画布重新排版（画布右键 →「格式化所有节点」）。
+
+    采用**分层列布局**（和蓝图那类自动整理插件是同一路数）：
+
+    1. **分层**：`层(v) = 1 + max(层(前驱))` → 每一层是一列，边永远从左指向右，
+       输出节点天然落在自己处理节点的右边一列（和 `slot_origin` 的语义一致）。
+    2. **列宽**：一列里最宽的节点决定这一列，下一列从 `列起点 + 列宽 + COL_GAP_X`
+       开始 —— 列与列横向永不相交，这是「零重叠」的一半保证。
+    3. **列内排序**：按上游/下游节点的重心迭代排（减少连线交叉）；同一个处理节点的
+       多个输出**绑成一组**，连排 + 序号递增。
+    4. **列内落位**：一列里逐个按"上一个的底 + `ROW_GAP_Y`"排开，整块**从锚点往下挂**
+       （锚点 = 这一列最上面那个节点的期望位置，见 `_fmt_place`）。同列永不重叠 ——
+       这是「零重叠」的另一半保证。
+    5. **分量**：互不相连的子图分开排，再按原来的上下顺序纵向堆叠，全部左对齐。
+    6. **锚点**：整体左上角对齐到**原来的包围盒左上角**，视野不会跳到别处；
+       吸附开着时所有坐标都吸到格点（向上吸，间距只大不小，见 §3.10）。
+
+    你担心的「第 n 个输出会不会压住第 n-1 个的下游」在这里不会发生：同一处理节点的
+    输出永远在同一列（纵向只要按各自高度累加），而它们的下游永远在更右边的列里，
+    横向就把地方让开了。真正会挤的只有「同一个处理节点下挂多棵子树」，那由第 3、4
+    步一起分摊掉。
+
+    返回被移动的节点数。
+    """
+    items = _fmt_collect(graph, registry, settings)
+    if len(items) < 2:
+        return 0
+    succ, pred = _fmt_links(items, graph)
+    comps = _fmt_components(list(items), succ, pred)
+    # 分量顺序：照它们现在的位置从上往下、从左往右 —— 尽量贴近用户本来的排布
+    comps.sort(
+        key=lambda c: (
+            min(_as_float(items[i].node.get("y")) for i in c),
+            min(_as_float(items[i].node.get("x")) for i in c),
+        )
+    )
+    # 原来整块画布的左上角（"锚点"），排版后要对回这里
+    anchor_x = min(_as_float(n.node.get("x")) for n in items.values())
+    anchor_y = min(_as_float(n.node.get("y")) for n in items.values())
+
+    g = grid_size(settings)
+    pos: dict[str, tuple[float, float]] = {}
+    cursor = anchor_y
+    for comp in comps:
+        y0 = {i: _as_float(items[i].node.get("y")) for i in comp}
+        colx, ys = _fmt_layout_component(comp, items, succ, pred, y0, g)
+        top = min(ys[i] for i in comp)
+        bottom = max(ys[i] + items[i].h for i in comp)
+        for i in comp:
+            pos[i] = (anchor_x + colx[i], snap_up(cursor + (ys[i] - top), g))
+        cursor = snap_up(cursor + (bottom - top) + COMPONENT_GAP_Y, g)
+
+    moved = 0
+    for i, (x, y) in pos.items():
+        node = items[i].node
+        if _as_float(node.get("x")) != x or _as_float(node.get("y")) != y:
+            node["x"], node["y"] = x, y
+            moved += 1
+    return moved
+
+
+def snapshot_positions(graph: dict) -> list[dict]:
+    """记下所有节点的坐标，供「撤销格式化」用（§3.11）。"""
+    return [
+        {"id": n["id"], "x": n.get("x"), "y": n.get("y")}
+        for n in (*graph.get("resources", []), *graph.get("processes", []))
+    ]
+
+
+def restore_positions(graph: dict, snapshot: list[dict]) -> int:
+    """把快照写回图里（只认还活着的节点；期间被删掉的直接跳过）。
+
+    返回真正被挪回去的节点数。
+    """
+    by_id = {n["id"]: n for n in (*graph.get("resources", []), *graph.get("processes", []))}
+    moved = 0
+    for it in snapshot or []:
+        node = by_id.get(it.get("id"))
+        if node is None:
+            continue
+        if node.get("x") != it.get("x") or node.get("y") != it.get("y"):
+            node["x"], node["y"] = it.get("x"), it.get("y")
+            moved += 1
     return moved
 
 

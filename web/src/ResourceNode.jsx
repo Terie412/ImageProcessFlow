@@ -5,7 +5,8 @@ import { imageUrl } from './api'
 export default function ResourceNode({ id, data, selected }) {
   const {
     name, kind, hasImage, mtime, index, width, height, format, canvasId, onReplace, onExport,
-    minW = 200, minH = 180, onResizeStart,
+    // 拖手柄时的下限：由 App.buildNodes 从服务端的 sizeSpec 带下来，这里不留兜底数字
+    minW, minH, onResizeStart,
   } = data
 
   return (
