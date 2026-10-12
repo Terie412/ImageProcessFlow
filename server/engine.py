@@ -114,9 +114,9 @@ def snap_value(v: float, g: float) -> float:
 def snap_up(v: float, g: float) -> float:
     """**向上**吸附：吸到不小于 v 的那个格点。
 
-    给「程序算出来的布局」用（输出槽位、重排）：这类位置有一条**下限**约束
-    （相邻间距不能小于 SLOT_GAP_Y，否则节点会压在一起），就近吸附会把间距
-    啃掉最多半个格。向上取整则保证间距只会变大一点点、绝不会变小。
+    给「程序算出来的布局」用（输出槽位、整图排版）：这类位置有一条**下限**约束
+    （相邻间距不能小于 `SLOT_GAP_Y` / `ROW_GAP_Y`，否则节点会压在一起），就近吸附
+    会把间距啃掉最多半个格。向上取整则保证间距只会变大一点点、绝不会变小。
     """
     if g <= 0:
         return v
@@ -131,7 +131,7 @@ def snap_graph(graph: dict, settings: dict | None) -> int:
 
     这里刻意做成「落盘前的统一收口」（见 main.persist）：只要吸附开着，
     凡是被写进 graph.json 的坐标都满足吸附规则。因此不光是用户拖动的节点，
-    连「脚本执行时引擎自己摆的输出槽位」「重排输出节点」「导入图片」落下
+    连「脚本执行时引擎自己摆的输出槽位」「整图排版」「导入图片」落下
     的位置也一并收齐 —— 不会出现画布上一半对齐、一半没对齐的状态。
     """
     g = grid_size(settings)
@@ -157,43 +157,9 @@ def snap_graph(graph: dict, settings: dict | None) -> int:
     return moved
 
 
-def tidy_outputs(graph: dict, registry: dict, settings: dict | None) -> int:
-    """把所有输出数据节点重新摆到各自处理节点的右侧、按槽位序号纵向排开。
-
-    纵向间距按**每个节点自己的高度**逐个累加，所以高低不一的一组也能紧凑排好。
-
-    吸附开着时，累加出来的位置**向上**吸到格点：先满足吸附规则，再尽量让间距
-    不小于 `SLOT_GAP_Y`（就近吸附可能把 10px 的缝啃成 7px，向上取整则只会变成
-    12~14px）。**所有会挪动节点的功能都按这个优先级来**，见 DESIGN.md §3.10。
-
-    返回被移动的节点数。用于收拾历史上被写死偏移量摆歪的画布。
-    """
-    g = grid_size(settings)
-    procs = {p["id"]: p for p in graph.get("processes", [])}
-    groups: dict[str, list[dict]] = {}
-    for r in graph.get("resources", []):
-        if r.get("producer"):
-            groups.setdefault(r["producer"], []).append(r)
-
-    moved = 0
-    for pid, items in groups.items():
-        proc = procs.get(pid)
-        if proc is None:
-            continue
-        base_x, y = slot_origin(proc, registry.get(proc.get("defId")) or {}, settings)
-        for r in sorted(items, key=lambda x: x.get("index", 0)):
-            if _as_float(r.get("x")) != base_x or _as_float(r.get("y")) != y:
-                r["x"], r["y"] = base_x, y
-                moved += 1
-            y = snap_up(y + resource_height(r, settings) + SLOT_GAP_Y, g)
-    return moved
-
-
 # --------------------------------------------------------------------------
 # 整图自动布局（画布右键 →「格式化所有节点」/「撤销格式化」）
 # --------------------------------------------------------------------------
-# 与「重排输出节点」的区别：那个只把输出数据节点摆到自己处理节点的右侧，
-# 完全不看处理节点之间、处理节点与上游之间的关系；这个是**整张图重新排版**。
 COL_GAP_X = SLOT_GAP_X        # 列间距：沿用输出节点那 64px 的横向留白，观感一致
 ROW_GAP_Y = 20                # 列内相邻节点的纵向留白（比 SLOT_GAP_Y=10 松一点：
                               # 整图重排后上下相邻的往往不是同一组输出，10 会显得糊在一起）
@@ -351,7 +317,7 @@ def _fmt_place(
 
     「组」= 同一个处理节点的输出（`gid` 相同）；组内按"上一个的底 + `ROW_GAP_Y`"
     等距往下排，**组的起点 = 它的期望位置**（对输出块来说就是处理节点自己的顶边，
-    于是输出块从处理节点的顶边开始往下排，与 `slot_origin` / 「重排输出节点」一致）。
+    于是输出块从处理节点的顶边开始往下排，与 `slot_origin` 一致）。
 
     组起点还受"间距下限"约束：压到上一组时往后让（`max(期望, 游标)`）—— 间距只会
     变大不会变小，所以同列永不重叠。这一条是必要的：一列里常常混着别的处理节点的

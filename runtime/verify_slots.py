@@ -92,58 +92,6 @@ def part_a() -> None:
     check("数据节点下限变大 → 实际高跟着变", engine_mod.resource_height({}, s3) == 500,
           str(engine_mod.resource_height({}, s3)))
 
-    # tidy_outputs：把摆歪的重新排好
-    print("\n[tidy_outputs] 收拾摆歪的输出节点（数据节点 220 高）")
-    g = {
-        "processes": [{"id": "p1", "defId": "qwen_image", "x": 0, "y": 0, "w": 600}],
-        "resources": [
-            {"id": "r1", "producer": "p1", "index": 0, "x": 380, "y": 0},      # 压在节点上
-            {"id": "r2", "producer": "p1", "index": 1, "x": 380, "y": 210},    # 又和 r1 重叠
-            {"id": "r3", "producer": "p1", "index": 2, "x": 380, "y": 420},
-            {"id": "r4", "name": "A", "kind": "input", "x": 5, "y": 5},        # 输入节点不该被碰
-        ],
-    }
-    n = engine_mod.tidy_outputs(g, {"qwen_image": manifest}, settings)
-    pos = {r["id"]: (r["x"], r["y"]) for r in g["resources"]}
-    print(f"   移动了 {n} 个；结果 {pos}")
-    check("三个输出都被移动", n == 3, str(n))
-    check("都摆到节点右侧（x = 600+64）", all(pos[k][0] == 664 for k in ("r1", "r2", "r3")), str(pos))
-    check("纵向按序号排开（间距 230 = 220+10）",
-          pos["r1"][1] == 0 and pos["r2"][1] == 230 and pos["r3"][1] == 460, str(pos))
-    check("输入节点没被碰", pos["r4"] == (5, 5), str(pos["r4"]))
-    n2 = engine_mod.tidy_outputs(g, {"qwen_image": manifest}, settings)
-    check("再跑一次是幂等的（不再移动）", n2 == 0, str(n2))
-
-    # 回归：数据节点被调矮到 180 时，必须排得紧凑（用户报的问题）
-    print("\n[tidy_outputs] 数据节点高 180 → 应该只留 10 的缝")
-    g2 = {
-        "processes": [{"id": "p1", "defId": "qwen_image", "x": 0, "y": 0, "w": 600}],
-        "resources": [
-            {"id": f"q{i}", "producer": "p1", "index": i, "x": 380, "y": 0, "h": 180, "w": 200}
-            for i in range(4)
-        ],
-    }
-    engine_mod.tidy_outputs(g2, {"qwen_image": manifest}, settings)
-    ys = [r["y"] for r in sorted(g2["resources"], key=lambda r: r["index"])]
-    print(f"   四个节点的 y：{ys}")
-    check("相邻间距 = 180 + 10 = 190（不再是写死的 290）", ys == [0, 190, 380, 570], str(ys))
-    check("缝隙正好是 10", all(ys[i + 1] - ys[i] - 180 == 10 for i in range(3)), str(ys))
-
-    # 高低不一的一组：按每个节点自己的高度逐个累加
-    print("\n[tidy_outputs] 高低不一的一组也要紧密贴合")
-    g3 = {
-        "processes": [{"id": "p1", "defId": "qwen_image", "x": 0, "y": 0, "w": 600}],
-        "resources": [
-            {"id": "a", "producer": "p1", "index": 0, "x": 0, "y": 0, "h": 180},
-            {"id": "b", "producer": "p1", "index": 1, "x": 0, "y": 0, "h": 400},
-            {"id": "c", "producer": "p1", "index": 2, "x": 0, "y": 0, "h": 180},
-        ],
-    }
-    engine_mod.tidy_outputs(g3, {"qwen_image": manifest}, settings)
-    ys3 = [r["y"] for r in sorted(g3["resources"], key=lambda r: r["index"])]
-    print(f"   三个节点的 y：{ys3}（高 180 / 400 / 180）")
-    check("按各自高度累加：0 → 190 → 600", ys3 == [0, 190, 600], str(ys3))
-
 
 # ------------------------------------------------------ B. 真实执行一遍
 SLOT_SCRIPT = '''\

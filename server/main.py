@@ -326,7 +326,7 @@ def persist() -> None:
     内存里的图与磁盘上的 json 都是对齐过的坐标。
 
     这里是**就近**吸附（最近的格点）—— 手动拖、导入图片这类「用户指哪打哪」
-    的位置用就近；而程序算出来的布局（输出槽位、重排）在算的时候就用
+    的位置用就近；而程序算出来的布局（输出槽位、整图排版）在算的时候就用
     `engine.snap_up` 向上吸附，保证间距下限不被破坏（见 engine.snap_graph）。
 
     文档里的**所有画布一起收** —— 它们都在内存里，吸附规则又是全局的，
@@ -1206,16 +1206,6 @@ def api_detect_regions(pid: str):
         "imageSize": [W, H],
         "log": log.splitlines()[-8:],
     }
-
-
-@app.post("/api/tidy")
-def api_tidy():
-    """把所有输出数据节点重排到各自处理节点右侧 —— 收拾历史上被写死偏移量摆歪的画布。"""
-    with LOCK:
-        n = engine_mod.tidy_outputs(graph(), STATE["registry"], STATE["settings"])
-        persist()
-    print(f"[画布] 重排输出节点：移动了 {n} 个")
-    return state_payload()
 
 
 # 「格式化所有节点」的撤销快照：**每个画布一份**，一直留到被撤销为止。

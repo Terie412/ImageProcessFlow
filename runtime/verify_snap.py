@@ -3,7 +3,7 @@
 
 A 部分：纯函数（不起服务）
   - grid_size / snap_value / snap_up / snap_graph 的行为
-  - **优先级**：吸附开着时，重排输出节点既要落在格点上，间距又不能小于 SLOT_GAP_Y
+  - **优先级**：吸附开着时，整图排版既要落在格点上，间距又不能小于 ROW_GAP_Y
 B 部分：打真实实例（默认 8770，可用 IPF_BASE 覆盖），验证
   - PATCH 设置开启吸附 → 整个画布的坐标立刻被收齐
   - 新增输出槽位也落在格点上
@@ -85,7 +85,7 @@ def part_a() -> None:
     check("吸附关着时是空操作", engine_mod.snap_graph(g2, off) == 0 and g2["resources"][0]["x"] == 123.7, "")
 
     # ---- 优先级：先满足吸附，再尽量满足间距 ----
-    print("\n[优先级] 吸附开着时重排：落在格点上 且 间距 ≥ SLOT_GAP_Y")
+    print("\n[优先级] 吸附开着时整图排版：落在格点上 且 间距 ≥ ROW_GAP_Y")
     manifest = {"id": "crop", "size": {"defaultWidth": 560, "defaultHeight": 480}}
     for gs in (5, 8, 13):
         s = {**off, "snapToGrid": True, "gridSize": gs}
@@ -93,18 +93,22 @@ def part_a() -> None:
             "processes": [{"id": "p1", "defId": "crop", "x": 2577.04, "y": 83.02, "w": 560.0}],
             # 高度刻意取非格点倍数（445 是 5 的倍数，但 8/13 不是）
             "resources": [
-                {"id": f"r{i}", "producer": "p1", "index": i, "x": 0.0, "y": 0.0, "h": 445.0}
+                {"id": f"r{i}", "name": f"R{i}", "kind": "output", "producer": "p1", "index": i,
+                 "x": 0.0, "y": 0.0, "h": 445.0}
                 for i in range(4)
             ],
+            "edges": [],
         }
-        engine_mod.tidy_outputs(graph, {"crop": manifest}, s)
+        engine_mod.format_all(graph, {"crop": manifest}, s)
         items = sorted(graph["resources"], key=lambda r: r["index"])
-        on_grid = all(r["x"] % gs == 0 and r["y"] % gs == 0 for r in items)
+        procs = graph["processes"]
+        on_grid = all(r["x"] % gs == 0 and r["y"] % gs == 0 for r in items + procs)
         gaps = [items[i + 1]["y"] - (items[i]["y"] + 445.0) for i in range(len(items) - 1)]
         print(f"   格={gs:>2}  y={[r['y'] for r in items]}  间距={gaps}")
-        check(f"格={gs}: 所有输出都落在格点上", on_grid, f"x={[r['x'] for r in items]}")
-        check(f"格={gs}: 间距都不小于 SLOT_GAP_Y({engine_mod.SLOT_GAP_Y})",
-              all(gp >= engine_mod.SLOT_GAP_Y for gp in gaps), str(gaps))
+        check(f"格={gs}: 所有节点都落在格点上", on_grid,
+              f"资源 x={[r['x'] for r in items]} 处理 {[(p['x'], p['y']) for p in procs]}")
+        check(f"格={gs}: 间距都不小于 ROW_GAP_Y({engine_mod.ROW_GAP_Y})",
+              all(gp >= engine_mod.ROW_GAP_Y for gp in gaps), str(gaps))
         check(f"格={gs}: 相邻不重叠", all(gp >= 0 for gp in gaps), str(gaps))
 
 

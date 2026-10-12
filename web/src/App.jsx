@@ -829,18 +829,7 @@ export default function App() {
     }
   }, [applyState, flash])
 
-  // 把输出节点重排到各自处理节点右侧（收拾历史上摆歪/叠在一起的画布）
-  const tidyOutputs = useCallback(async () => {
-    try {
-      applyState(await api.tidyOutputs())
-      flash('已把输出节点重排到各自处理节点的右侧')
-    } catch (e) {
-      flash(e.message)
-    }
-  }, [applyState, flash])
-
   // 整张画布重新排版：分层列布局，处理节点 / 输出节点 / 输入图全都重排
-  // （和「重排输出节点」的区别：那个只动输出节点，不看节点之间的关系）
   const formatAll = useCallback(async () => {
     try {
       const s = await api.formatAll()
@@ -1360,15 +1349,6 @@ export default function App() {
             <div className="ctx-sep" />
 
             <div className="ctx-title">画布</div>
-            <button
-              className="ctx-item"
-              onClick={() => {
-                tidyOutputs()
-                setMenu(null)
-              }}
-            >
-              重排输出节点
-            </button>
             <button
               className="ctx-item"
               onClick={() => {
