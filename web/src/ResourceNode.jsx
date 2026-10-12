@@ -4,7 +4,11 @@ import { imageUrl } from './api'
 
 export default function ResourceNode({ id, data, selected }) {
   const {
-    name, kind, hasImage, mtime, index, width, height, format, canvasId, onReplace, onExport,
+    name, kind, hasImage, mtime, index, width, height, format, canvasId,
+    // 上次「下载」到的**完整路径**（服务端存在 graph.json 的这个节点上）。
+    // 有它就冒出一个「覆盖」按钮 —— 点一下直接盖掉那个文件，不再走另存为。
+    lastExportPath,
+    onReplace, onExport, onOverwrite,
     // 拖手柄时的下限：由 App.buildNodes 从服务端的 sizeSpec 带下来，这里不留兜底数字
     minW, minH, onResizeStart,
   } = data
@@ -41,6 +45,17 @@ export default function ResourceNode({ id, data, selected }) {
         <button className="tiny nodrag" disabled={!hasImage} onClick={() => onExport(id, name)}>
           下载
         </button>
+        {/* 只对「下载过」的节点显示；悬停能看到它记住的完整路径 */}
+        {lastExportPath ? (
+          <button
+            className="tiny nodrag"
+            title={`覆盖到：${lastExportPath}`}
+            disabled={!hasImage}
+            onClick={() => onOverwrite(id, name)}
+          >
+            覆盖
+          </button>
+        ) : null}
       </div>
 
       <Handle type="source" position={Position.Right} id="out" />

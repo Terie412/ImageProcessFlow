@@ -819,10 +819,11 @@ def api_pick_workspace():
 def api_export(payload: dict):
     """把当前画布里的一张图复制到用户指定的位置（UI 上叫「下载」）。
 
-    每个数据节点**自己记住**上次下载到了哪个目录（存进 graph.json 里该节点的
-    lastExportDir 字段），下次点「下载」时对话框直接定位到那个目录；没记过、
-    或记的目录已不存在，就退回工作目录根。节点删了记忆也就没了，跨画布
-    复制粘贴不会把这条记忆带过去（粘贴出来的是新节点）。
+    每个数据节点**自己记住**上次下载到了**哪个完整路径**（存进 graph.json 里该节点的
+    lastExportPath 字段），下次点「下载」时对话框直接定位到那个文件所在目录；没记过、
+    或记的目录已不存在，就退回工作目录根。
+
+    节点删了记忆也就没了，跨画布复制粘贴不会把这条记忆带过去（粘贴出来的是新节点）。
     """
     body = payload or {}
     name = body.get("name", "")
@@ -832,19 +833,76 @@ def api_export(payload: dict):
     if src is None:
         raise HTTPException(404, f"图片不存在: {name}")
     node = engine_mod._resource(graph(), resource_id) if resource_id else None  # noqa: SLF001
-    last = (node or {}).get("lastExportDir") or ""
-    initial_dir = last if (node is not None and Path(last).is_dir()) else str(w.root)
+    # 记忆优先用完整路径的父目录；老的（只有 lastExportDir 的）记录仍能定位目录
+    remembered = (node or {}).get("lastExportPath") or (node or {}).get("lastExportDir") or ""
+    last_dir = str(Path(remembered).parent) if remembered else ""
+    initial_dir = last_dir if (node is not None and Path(last_dir).is_dir()) else str(w.root)
+    # 记忆里的文件名也带上：用户可能把下载的副本改过名，再点下载时默认回到那个名字
+    initial_file = Path(remembered).name if remembered else src.name
     try:
-        dest = _tk_save_as(initial_dir, src.name)
+        dest = _tk_save_as(initial_dir, initial_file or src.name)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"无法打开系统对话框：{e}") from e
     if not dest:
         return {"cancelled": True}
     shutil.copy2(src, dest)
     if node is not None:
-        node["lastExportDir"] = str(Path(dest).parent)
+        node["lastExportPath"] = str(dest)
+        node["lastExportDir"] = str(Path(dest).parent)  # 兼容旧字段
         persist()
-    return {"ok": True, "saved": dest}
+    return {"ok": True, "saved": dest, "modified": False}
+
+
+@app.post("/api/workspace/overwrite")
+def api_overwrite(payload: dict):
+    """「覆盖」：把当前画布里的这张图**直接写回**上次下载的完整路径，不弹对话框。
+
+    与「下载」的区别只有一个 —— 不挑位置、不打字，直接盖掉 `lastExportPath` 指向的
+    那个文件（同名覆盖）。典型场景：输出节点重跑出新图后，之前手工下载过一份给
+    别的软件用，现在懒得再「下载 → 另存为 → 一路点确定」。
+
+    记忆文件**已经不在**时，退回「下载」的语义：弹另存为对话框重新选一次位置
+    （返回 `modified: true` 让前端提示换成「已保存到」）。父目录不存在则报错，
+    绝不悄悄替用户造目录。
+    """
+    body = payload or {}
+    name = body.get("name", "")
+    resource_id = body.get("resource_id", "")
+    w = ws()
+    src = view().image_path(name)
+    if src is None:
+        raise HTTPException(404, f"图片不存在: {name}")
+    node = engine_mod._resource(graph(), resource_id) if resource_id else None  # noqa: SLF001
+    remembered = (node or {}).get("lastExportPath") or ""
+
+    # 记忆失效（没记过 / 文件被删被移）→ 按「下载」走另存为
+    if not remembered or not Path(remembered).is_file():
+        remembered_dir = (node or {}).get("lastExportDir") or ""
+        initial_dir = (
+            remembered_dir if (node is not None and Path(remembered_dir).is_dir()) else str(w.root)
+        )
+        initial_file = Path(remembered).name if remembered else src.name
+        try:
+            dest = _tk_save_as(initial_dir, initial_file or src.name)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, f"无法打开系统对话框：{e}") from e
+        if not dest:
+            return {"cancelled": True}
+        shutil.copy2(src, dest)
+        if node is not None:
+            node["lastExportPath"] = str(dest)
+            node["lastExportDir"] = str(Path(dest).parent)
+            persist()
+        return {"ok": True, "saved": dest, "modified": True}
+
+    dest = Path(remembered)
+    if not dest.parent.is_dir():
+        raise HTTPException(400, f"目标目录已不存在：{dest.parent}")
+    try:
+        shutil.copy2(src, dest)
+    except OSError as e:
+        raise HTTPException(500, f"覆盖失败：{e}") from e
+    return {"ok": True, "saved": str(dest), "modified": False}
 
 
 # --------------------------------------------------------------------------

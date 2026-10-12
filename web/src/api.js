@@ -44,6 +44,9 @@ export const setWorkspace = (path) => post('/api/workspace', { path })
 export const pickWorkspace = () => post('/api/workspace/pick')
 export const exportImage = (name, resourceId) =>
   post('/api/workspace/export', { name, resource_id: resourceId || '' })
+// 「覆盖」：直接写回上次下载的完整路径，不弹对话框（记忆文件不在时服务端退回另存为）
+export const overwriteImage = (name, resourceId) =>
+  post('/api/workspace/overwrite', { name, resource_id: resourceId || '' })
 
 export const createProcess = (defId, x, y) => post('/api/processes', { defId, x, y })
 export const updateProcess = (id, payload) => patch(`/api/processes/${id}`, payload)

@@ -543,6 +543,24 @@ export default function App() {
     [flash],
   )
 
+  /* 「覆盖」：直接写回上次下载的路径。服务端发现记忆文件已不在时会退回另存为，
+     这时 r.modified 为 true，提示换成「已保存到」而不是「已覆盖」
+     （同时节点上的 lastExportPath 也变了，得拉一次状态才能刷新按钮的悬停提示）。 */
+  const onOverwrite = useCallback(
+    async (id, name) => {
+      try {
+        const r = await api.overwriteImage(name, id)
+        if (r && r.ok) {
+          flash(r.modified ? `已保存到 ${r.saved}` : `已覆盖 ${r.saved}`)
+          if (r.modified) applyState(await api.getState())
+        }
+      } catch (e) {
+        flash(e.message)
+      }
+    },
+    [flash, applyState],
+  )
+
   const onPorts = useCallback(
     async (pid, group, count) => {
       if (count < 0) return
@@ -644,11 +662,11 @@ export default function App() {
 
   const cbs = useMemo(
     () => ({
-      onParam, onExecute, onDelete, onReplace, onExport, onPorts, onRemovePort, onPolish,
+      onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onPolish,
       onDetect, onEditRegions,
       onResizeStart,
     }),
-    [onParam, onExecute, onDelete, onReplace, onExport, onPorts, onRemovePort, onPolish,
+    [onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onPolish,
      onDetect, onEditRegions, onResizeStart],
   )
   cbsRef.current = cbs
