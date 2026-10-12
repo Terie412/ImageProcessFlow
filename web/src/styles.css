@@ -185,7 +185,19 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   min-height: 80px;
   flex: 1 1 auto;               /* 撑满节点剩余高度，跟着节点尺寸走 */
 }
-.thumb img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+/* 缩略图底下垫小号棋盘格：图片自带透明通道时，透明区域透出灰白格子，
+   和深色画布底一眼区分开（不透明的图把格子全盖住，毫无影响） */
+.thumb img {
+  display: block; max-width: 100%; max-height: 100%; object-fit: contain;
+  background-color: #22262d;
+  background-image:
+    linear-gradient(45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(-45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2f353f 75%),
+    linear-gradient(-45deg, transparent 75%, #2f353f 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
 .thumb .ph { color: #4d5563; padding: 24px 0; font-size: 11px; }
 
 .node-foot {
@@ -240,6 +252,10 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   font-variant-numeric: tabular-nums;
 }
 .port-row.linked { color: var(--text); }
+/* 保持比例打开时，非第一个已连接的输入口：整行置灰（连线保留、执行不生效） */
+.port-row.off { opacity: .4; }
+.port-row.off .react-flow__handle,
+.port-row.off .port-label { background: #3a414c; border-color: #3a414c; }
 /* 覆盖 React Flow 的绝对定位，让圈圈跟着自己那一行 */
 .port-row .react-flow__handle {
   position: static;
@@ -366,37 +382,38 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .ctx-menu {
   position: absolute;
   z-index: 40;
-  min-width: 176px;
+  min-width: 132px;
   max-width: 260px;
   max-height: 70%;
   overflow: auto;
-  padding: 6px;
+  padding: 3px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
 }
 .ctx-title {
-  padding: 4px 8px 5px;
+  padding: 2px 7px;
   color: var(--muted);
-  font-size: 11px;
-  letter-spacing: .4px;
+  font-size: 10px;
+  letter-spacing: .3px;
 }
-.ctx-empty { padding: 2px 8px 8px; color: #6c7480; font-size: 12px; }
+.ctx-empty { padding: 2px 7px 5px; color: #6c7480; font-size: 10.5px; }
 .ctx-item {
   display: block;
   width: 100%;
-  padding: 6px 9px;
+  padding: 2px 7px;
   text-align: left;
-  font-size: 12.5px;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--text);
   background: transparent;
   border: none;
-  border-radius: 7px;
+  border-radius: 5px;
   cursor: pointer;
 }
 .ctx-item:hover { background: var(--panel-2); }
-.ctx-sep { height: 1px; margin: 6px 4px; background: var(--line); }
+.ctx-sep { height: 1px; margin: 3px 3px; background: var(--line); }
 
 /* ---------------- 遮罩 ---------------- */
 .modal-mask {
@@ -431,7 +448,18 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .region-shot .ph { color: #4d5563; font-size: 11.5px; }
 .region-canvas { position: relative; line-height: 0; }
-.region-canvas img { display: block; width: 100%; height: 100%; }
+.region-canvas img {
+  display: block; width: 100%; height: 100%;
+  /* 同 .thumb img：透明区域透出棋盘格（8px，预览图小） */
+  background-color: #22262d;
+  background-image:
+    linear-gradient(45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(-45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2f353f 75%),
+    linear-gradient(-45deg, transparent 75%, #2f353f 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
 .region-layer { position: absolute; inset: 0; }
 .region-box {
   position: absolute; box-sizing: border-box;

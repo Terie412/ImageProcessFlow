@@ -42,7 +42,8 @@ export const pasteNodes = (at) => post('/api/clipboard/paste', at || {})
 
 export const setWorkspace = (path) => post('/api/workspace', { path })
 export const pickWorkspace = () => post('/api/workspace/pick')
-export const exportImage = (name) => post('/api/workspace/export', { name })
+export const exportImage = (name, resourceId) =>
+  post('/api/workspace/export', { name, resource_id: resourceId || '' })
 
 export const createProcess = (defId, x, y) => post('/api/processes', { defId, x, y })
 export const updateProcess = (id, payload) => patch(`/api/processes/${id}`, payload)

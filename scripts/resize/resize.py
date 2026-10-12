@@ -146,6 +146,16 @@ def main() -> int:
         print("一个输入口都没连图 —— 把左侧的输入口接上图片再执行", file=sys.stderr)
         return 3
 
+    # 保持比例开关：只处理第一个（序号最小的）输入，其余输入虽然连着但不生效
+    if params.get("keepRatio"):
+        dropped = srcs[1:]
+        srcs = srcs[:1]
+        if dropped:
+            log(
+                f"[保持比例] 只处理第一个输入，其余 {len(dropped)} 个输入已忽略："
+                + "，".join(os.path.basename(p) for _, p in dropped)
+            )
+
     log(f"[分辨率向量] {tw}×{th}")
     log(f"[输入] 共 {len(srcs)} 张：" + "，".join(os.path.basename(p) for _, p in srcs))
     log("")

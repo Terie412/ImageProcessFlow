@@ -1,0 +1,25 @@
+{
+  "id": "square_pad",
+  "name": "正方形扩展",
+  "entry": "square_pad.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "输入图",
+      "count": 1,
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  ],
+  "params": [],
+  "outputs": [{ "key": "image", "type": "image", "multi": true }],
+
+  "_note": "把短边两侧居中补全透明，使图片变成正方形（50×100 → 左右各补 25 → 100×100）。多输入：有几个输入口连了图就产出几张，各图独立处理。本来就是正方形的图原样复制，不做二次编码。需要补边时输出一律是 PNG（JPEG 存不了透明通道）。",
+  "size": {
+    "defaultWidth": 280,
+    "defaultHeight": 280
+  }
+}

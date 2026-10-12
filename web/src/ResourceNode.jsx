@@ -37,7 +37,7 @@ export default function ResourceNode({ id, data, selected }) {
             替换图片
           </button>
         )}
-        <button className="tiny nodrag" disabled={!hasImage} onClick={() => onExport(name)}>
+        <button className="tiny nodrag" disabled={!hasImage} onClick={() => onExport(id, name)}>
           下载
         </button>
       </div>

@@ -56,7 +56,7 @@ DEFAULT_SETTINGS: dict = {
     # 上次打开过的工作目录：下次启动自动打开，省得每次都要重选一遍
     "lastWorkspace": "",
     # 网格吸附：开启后拖动节点会吸到格点上，落盘的坐标也一律对齐到格点
-    "snapToGrid": False,
+    "snapToGrid": True,
     # 吸附格大小（px）
     "gridSize": 5,
     # 每种节点的最小尺寸（画布坐标），按**具体节点类型**分：
@@ -67,6 +67,11 @@ DEFAULT_SETTINGS: dict = {
     "nodeMin": {
         "resource": {"w": 200, "h": 180},
         "process": {"w": 560, "h": 280},
+        # 各处理节点类型的默认下限（用户实测后定下的值）
+        "process:crop": {"w": 280, "h": 280},
+        "process:qwen_image": {"w": 560, "h": 280},
+        "process:resize": {"w": 180, "h": 180},
+        "process:square_pad": {"w": 280, "h": 280},
     },
 }
 
@@ -736,19 +741,33 @@ def api_pick_workspace():
 
 @app.post("/api/workspace/export")
 def api_export(payload: dict):
-    """把当前画布里的一张图复制到用户指定的位置（UI 上叫「下载」）。"""
-    name = (payload or {}).get("name", "")
+    """把当前画布里的一张图复制到用户指定的位置（UI 上叫「下载」）。
+
+    每个数据节点**自己记住**上次下载到了哪个目录（存进 graph.json 里该节点的
+    lastExportDir 字段），下次点「下载」时对话框直接定位到那个目录；没记过、
+    或记的目录已不存在，就退回工作目录根。节点删了记忆也就没了，跨画布
+    复制粘贴不会把这条记忆带过去（粘贴出来的是新节点）。
+    """
+    body = payload or {}
+    name = body.get("name", "")
+    resource_id = body.get("resource_id", "")
     w = ws()
     src = view().image_path(name)
     if src is None:
         raise HTTPException(404, f"图片不存在: {name}")
+    node = engine_mod._resource(graph(), resource_id) if resource_id else None  # noqa: SLF001
+    last = (node or {}).get("lastExportDir") or ""
+    initial_dir = last if (node is not None and Path(last).is_dir()) else str(w.root)
     try:
-        dest = _tk_save_as(str(w.root), src.name)
+        dest = _tk_save_as(initial_dir, src.name)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"无法打开系统对话框：{e}") from e
     if not dest:
         return {"cancelled": True}
     shutil.copy2(src, dest)
+    if node is not None:
+        node["lastExportDir"] = str(Path(dest).parent)
+        persist()
     return {"ok": True, "saved": dest}
 
 

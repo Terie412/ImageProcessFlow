@@ -5,6 +5,7 @@ import {
   MarkerType,
   MiniMap,
   ReactFlow,
+  SelectionMode,
   useEdgesState,
   useNodesState,
   useReactFlow,
@@ -69,6 +70,27 @@ function minRows(state) {
 const EDGE_STYLE = { stroke: '#4f9cf9' }
 const EDGE_MARKER = { type: MarkerType.ArrowClosed, color: '#4f9cf9', width: 18, height: 18 }
 const IMPLICIT_STYLE = { stroke: '#4a5563', strokeDasharray: '4 4' }
+
+// 分辨率参数的合法区间（与 resize manifest 的 min/max 保持一致）
+const clampDim = (v) => Math.max(1, Math.min(16384, Math.round(v)))
+
+/* 节点当前「生效的第一个输入」的数据节点（带原图宽高）。
+   「第一个」= 序号最小的**连了图**的输入口 —— image1 没连时生效的是 image2。
+   只认 width/height 都读得到的图；找不到返回 null。 */
+function firstLinkedRes(st, pid) {
+  const g = st?.graph
+  if (!g) return null
+  const portNum = (k) => {
+    const m = /(\d+)$/.exec(k || '')
+    return m ? Number(m[1]) : 0
+  }
+  const es = g.edges.filter((e) => e.to === pid).sort((a, b) => portNum(a.port) - portNum(b.port))
+  for (const e of es) {
+    const r = g.resources.find((x) => x.id === e.from)
+    if (r?.width && r?.height) return r
+  }
+  return null
+}
 
 /* ------------------------------------------------------------------ */
 /* 由服务端 graph 构造 React Flow 的 nodes / edges                      */
@@ -181,6 +203,7 @@ export default function App() {
   const pending = useRef({})
   const fitted = useRef(false)
   const stateRef = useRef(null)
+  const nodesRef = useRef([]) // 最新一帧的 React Flow 节点（读本地的 params，比服务端状态新鲜）
   const selectionRef = useRef({ nodes: [], edges: [] })
 
   const { screenToFlowPosition, fitView, getZoom, getViewport, setViewport } = useReactFlow()
@@ -385,7 +408,8 @@ export default function App() {
   )
 
   /* ---------------- 回调 ---------------- */
-  const onParam = useCallback(
+  // 单个参数的本地更新 + 防抖落盘（onParam 和比例联动都走这里，写进同一批 PATCH）
+  const pushParam = useCallback(
     (pid, key, value) => {
       setNodes((ns) =>
         ns.map((n) =>
@@ -404,6 +428,59 @@ export default function App() {
     },
     [setNodes, flash],
   )
+
+  /* 保持比例（调整分辨率节点）：算出需要连带调整的姊妹参数，不需要就返回 null。
+     读节点本地 params（nodesRef 比服务端状态新鲜，开关刚拨上也能立刻生效），
+     原图宽高从服务端状态取（图片尺寸只有服务端算）。 */
+  const ratioSibling = useCallback((pid, key, value) => {
+    const node = nodesRef.current.find((n) => n.id === pid)
+    const d = node?.data
+    if (!d || d.manifest?.id !== 'resize') return null
+    const params = d.params || {}
+    if (key === 'keepRatio') {
+      if (!value) return null // 关掉不同步；打开时维持宽、调高（时机 2）
+    } else {
+      if (!params.keepRatio) return null // 开关没开，改宽高就是普通编辑
+      if (key !== 'width' && key !== 'height') return null
+    }
+    const res = firstLinkedRes(stateRef.current, pid)
+    if (!res) return null // 没有生效输入，没什么可跟的
+    const W = res.width
+    const H = res.height
+    const curW = Number(params.width) || 0
+    const curH = Number(params.height) || 0
+    if (key === 'keepRatio') {
+      if (curW <= 0) return null
+      const nh = clampDim((curW * H) / W)
+      return nh !== curH ? { height: nh } : null
+    }
+    const v = Number(value)
+    if (!Number.isFinite(v) || v <= 0) return null
+    if (key === 'width') {
+      const nh = clampDim((v * H) / W) // 时机 3：改宽 → 调高
+      return nh !== curH ? { height: nh } : null
+    }
+    const nw = clampDim((v * W) / H) // 时机 3：改高 → 调宽
+    return nw !== curW ? { width: nw } : null
+  }, [])
+
+  const onParam = useCallback(
+    (pid, key, value) => {
+      pushParam(pid, key, value)
+      const sib = ratioSibling(pid, key, value)
+      if (sib) {
+        const [k, v] = Object.entries(sib)[0]
+        pushParam(pid, k, v) // 合进同一批 PATCH，500ms 后一起落盘
+      }
+    },
+    [pushParam, ratioSibling],
+  )
+
+  /* ---------------- 执行日志 ----------------
+     日志数据（drawer）在执行期间始终收集，但面板**默认不弹出**；
+     顶栏「执行日志」按钮随时可以点开看最近一次（进行中也行）。
+     失败时 toast 会照常报错，不看日志也不会漏掉失败这件事。 */
+  const [logOpen, setLogOpen] = useState(false)
 
   const onExecute = useCallback(
     async (pid) => {
@@ -445,9 +522,9 @@ export default function App() {
   }, [])
 
   const onExport = useCallback(
-    async (name) => {
+    async (id, name) => {
       try {
-        const r = await api.exportImage(name)
+        const r = await api.exportImage(name, id)
         if (r && r.ok) flash(`已保存到 ${r.saved}`)
       } catch (e) {
         flash(e.message)
@@ -566,6 +643,7 @@ export default function App() {
   )
   cbsRef.current = cbs
   stateRef.current = state
+  nodesRef.current = nodes
 
   /* ---------------- 加载 ---------------- */
   useEffect(() => {
@@ -584,8 +662,23 @@ export default function App() {
   /* ---------------- 交互 ---------------- */
   const onConnect = useCallback(
     async (conn) => {
+      const prev = stateRef.current // 连线前的状态：用来判断节点之前有没有生效输入
       try {
-        applyState(await api.createEdge(conn.source, conn.target, conn.targetHandle))
+        const st = await api.createEdge(conn.source, conn.target, conn.targetHandle)
+        applyState(st)
+        // 保持比例（时机 1）：开关开着、节点从没有输入 → 连上第一张图，
+        // 维持宽不变、按原图比例调整高。之前已有生效输入就不动（追加连线不算）。
+        const p = st.graph?.processes.find((x) => x.id === conn.target)
+        if (p?.defId === 'resize' && p.params?.keepRatio && !firstLinkedRes(prev, conn.target)) {
+          const res = firstLinkedRes(st, conn.target)
+          const w = Number(p.params?.width) || 0
+          if (res && w > 0) {
+            const nh = clampDim((w * res.height) / res.width)
+            if (nh !== (Number(p.params.height) || 0)) {
+              applyState(await api.updateProcess(conn.target, { params: { height: nh } }))
+            }
+          }
+        }
       } catch (e) {
         flash(e.message)
       }
@@ -593,8 +686,17 @@ export default function App() {
     [applyState, flash],
   )
 
-  const onNodeDragStop = useCallback((evt, node) => {
-    api.savePositions([{ id: node.id, x: node.position.x, y: node.position.y }]).catch(() => {})
+  // 拖动结束：把**本次拖动的所有节点**一起落盘。第三个参数 nodes 是 React Flow
+  // 给的「参与这次拖动的全部节点」（框选后整组拖动时 >1）——只存 node 一个的话，
+  // 组里其他节点的新位置只活在内存里，下次任何状态刷新（连线/改参数/执行）
+  // 都会被服务端的旧坐标弹回去，看起来就像「节点自己乱跑」。
+  const onNodeDragStop = useCallback((evt, node, nodes) => {
+    const items = (nodes?.length ? nodes : [node]).map((n) => ({
+      id: n.id,
+      x: n.position.x,
+      y: n.position.y,
+    }))
+    api.savePositions(items).catch(() => {})
   }, [])
   // 双击数据节点 → 打开大图查看器（缩略图太小，抠图这种活必须能放大看）
   const onNodeDoubleClick = useCallback((evt, node) => {
@@ -959,6 +1061,13 @@ export default function App() {
           ＋ 导入图片
         </button>
         <button onClick={reloadScripts}>重新加载脚本</button>
+        <button
+          onClick={() => setLogOpen(true)}
+          disabled={!drawer}
+          title="查看最近一次执行的日志"
+        >
+          执行日志{drawer?.status === 'running' ? '（进行中…）' : ''}
+        </button>
 
         <div className="settings-wrap">
           <button
@@ -1103,6 +1212,13 @@ export default function App() {
           onNodeDoubleClick={onNodeDoubleClick}
           onNodeContextMenu={(e) => e.preventDefault()}
           nodeTypes={nodeTypes}
+          /* 左键交互：
+             - 空白处按住拖动 → 框选（碰到节点的就算选中，Partial 模式）
+             - 节点上按住拖动 → 移动节点；拖的是已框选的节点时整组一起动（ReactFlow 内置）
+             画布平移只认**中键**（panOnDrag=[1]），左键不再平移。 */
+          selectionOnDrag
+          panOnDrag={[1]}
+          selectionMode={SelectionMode.Partial}
           /* 网格吸附：拖动时就吸到格点上（服务端在落盘时还会再兜一遍，
              见 DESIGN.md §3.10）。关掉时 snapGrid 不起作用。 */
           snapToGrid={!!state?.settings?.snapToGrid}
@@ -1206,7 +1322,7 @@ export default function App() {
         ) : null}
       </div>
 
-      {drawer ? (
+      {drawer && logOpen ? (
         <div className="drawer">
           <div className="drawer-head">
             <span className={`dot ${drawer.status}`} />
@@ -1215,7 +1331,7 @@ export default function App() {
               {drawer.status === 'running' ? '进行中…' : drawer.status === 'error' ? '失败' : '完成'}
             </span>
             <span className="spacer" />
-            <button className="tiny" onClick={() => setDrawer(null)}>
+            <button className="tiny" onClick={() => setLogOpen(false)}>
               关闭
             </button>
           </div>

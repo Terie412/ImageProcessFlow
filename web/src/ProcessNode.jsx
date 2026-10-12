@@ -175,6 +175,16 @@ export default function ProcessNode({ id, data, selected }) {
   const barePorts =
     portSpecs.length > 0 && portSpecs.every((p) => !p.num && !(p.label || '').trim())
 
+  /* 保持比例（调整分辨率）：开关打开时只有第一个连了图的输入口生效，
+     其余已连接的口整行置灰（连线保留、执行时被脚本忽略）。
+     「第一个」= 序号最小的连了图的口 —— image1 没连时生效的是 image2。 */
+  const lockFirst = manifest?.id === 'resize' && !!params.keepRatio
+  const firstLinkedKey = lockFirst
+    ? portSpecs
+        .filter((p) => inputs[p.key])
+        .sort((a, b) => (a.num ?? 0) - (b.num ?? 0))[0]?.key
+    : null
+
   return (
     <div className={`node ${selected ? 'selected' : ''}`}>
       <div className="node-head">
@@ -198,9 +208,13 @@ export default function ProcessNode({ id, data, selected }) {
               const label = p.num ?? (p.label || '')
               return (
                 <div
-                  className={`port-row ${linked ? 'linked' : ''}`}
+                  className={`port-row ${linked ? 'linked' : ''}${
+                    lockFirst && linked && p.key !== firstLinkedKey ? ' off' : ''
+                  }`}
                   key={p.key}
-                  title={`${p.label || '输入图'}${linked ? ` · 已连图片 ${link.name}` : ' · 未连线'}`}
+                  title={`${p.label || '输入图'}${
+                    linked ? ` · 已连图片 ${link.name}` : ' · 未连线'
+                  }${lockFirst && linked && p.key !== firstLinkedKey ? ' · 保持比例打开，本输入不生效' : ''}`}
                 >
                   <Handle type="target" position={Position.Left} id={p.key} />
                   {/* 一栏里只放「接口 + 序号 + 减号」，图片名不显示（鼠标悬停能看到） */}
