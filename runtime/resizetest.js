@@ -33,6 +33,14 @@ const post = (path, body) =>
     body: JSON.stringify(body),
   }).then((r) => r.json())
 
+// 设置接口是 PATCH，别拿上面的 POST 去发 —— 405 会被 .then(r => r.json()) 悄悄吞掉
+const patch = (path, body) =>
+  fetch(`${BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => r.json())
+
 async function makeDataNode(x, y) {
   const fd = new FormData()
   fd.append('file', new Blob([readFileSync(SEED)], { type: 'image/png' }), 'seed.png')
@@ -44,6 +52,7 @@ async function makeDataNode(x, y) {
 }
 
 let ORIG_WS = null
+let ORIG_SCALE = null
 
 async function main() {
   const results = []
@@ -63,7 +72,10 @@ async function main() {
   await makeDataNode(60, 1100)
   const st = await post('/api/processes', { defId: 'qwen_image', x: 420, y: 120 })
   const pid = st.graph.processes[st.graph.processes.length - 1].id
-  const msz = (await state()).settings.nodeMin.process
+  // 下限要取**服务端算出来的有效值**（sizeSpec），不能只看 settings.nodeMin.process ——
+  // 那只是通用兜底，`process:<defId>` 可以单独覆盖（本项目里 qwen_image 就被覆盖成 200×200）
+  const qspec = (await state()).sizeSpec['process:qwen_image']
+  const msz = qspec ? { w: qspec.minW, h: qspec.minH } : (await state()).settings.nodeMin.process
 
   let target = null
   for (let i = 0; i < 120; i++) {
@@ -188,7 +200,7 @@ async function main() {
     check('刷新后尺寸没丢', Math.abs(afterReload.w - after.w) < 4 && Math.abs(afterReload.h - after.h) < 4,
       `${after.w}×${after.h} → ${afterReload.w}×${afterReload.h}`)
 
-    console.log(`\n[5] 往小拖会被最小值拦住（settings.nodeMin.process: ${msz.w}×${msz.h}）`)
+    console.log(`\n[5] 往小拖会被最小值拦住（effective min: ${msz.w}×${msz.h}，来自 sizeSpec）`)
     h = await handleBox(pid)
     await drag(h.x, h.y, -900, -900)
     const shrunk = await nodeBox(pid)
@@ -197,9 +209,55 @@ async function main() {
     console.log(`   拖到极限后 ${shrunk.w}×${shrunk.h}  （最小应为 ${minW}×${minH}）`)
     check('宽度被最小值挡住', shrunk.w >= minW - 3, `${shrunk.w} >= ${minW}`)
     check('高度被最小值挡住', shrunk.h >= minH - 3, `${shrunk.h} >= ${minH}`)
+
+    console.log('\n[6] 缩放吸附：宽高吸到步长的整数倍（0 = 关闭）')
+    ORIG_SCALE = (await state()).settings.scaleSnap
+    // 设置是页面启动时读进 React state 的，改完必须重新加载才生效
+    const setScale = async (v) => {
+      await patch('/api/settings', { scaleSnap: v })
+      await send('Page.navigate', { url: BASE })
+      await sleep(3800)
+    }
+    const sizeNow = async () => {
+      const p = (await state()).graph.processes.find((x) => x.id === pid)
+      return { w: p.w, h: p.h }
+    }
+    const dragHandle = async (dx, dy) => {
+      const hb = await handleBox(pid)
+      await drag(hb.x, hb.y, dx, dy)
+      await sleep(600)
+      return sizeNow()
+    }
+
+    await setScale(25)
+    // 先确认设置真的落到页面里了 —— 发错方法（PATCH 写成 POST）时接口只回 405，
+    // 不校验的话整段会拿着**默认的 10** 跑，还看不出来
+    const eff = (await state()).settings.scaleSnap
+    check('设置已生效：服务端 scaleSnap = 25', eff === 25, String(eff))
+    const b25 = await sizeNow()
+    const r25 = await dragHandle(120, 90)
+    console.log(`   步长 25：${b25.w}×${b25.h} → ${r25.w}×${r25.h}`)
+    check('步长 25：确实被拖大了（不是没拖动）',
+      r25.w > b25.w && r25.h > b25.h, `${b25.w}×${b25.h} → ${r25.w}×${r25.h}`)
+    check('步长 25：落盘宽度是 25 的整数倍', r25.w % 25 === 0, `w=${r25.w}`)
+    check('步长 25：落盘高度是 25 的整数倍', r25.h % 25 === 0, `h=${r25.h}`)
+
+    // 0 = 关闭。从同一个起点只拖 3 个**屏幕**像素 —— 换算成画布像素是 round(3/zoom)，
+    // 只要缩放不小于 MIN_ZOOM(0.15) 它就落在 2~20，绝不可能是 25 的倍数。起点是
+    // 25 的整数倍，所以「前后都不再是整数倍」这条断言是算出来的，不靠运气。
+    await setScale(0)
+    const b0 = await sizeNow()
+    const r0 = await dragHandle(3, 3)
+    console.log(`   步长 0：${b0.w}×${b0.h} → ${r0.w}×${r0.h}（画布位移 ${r0.w - b0.w}）`)
+    check('关闭吸附后拖动仍然有效', r0.w > b0.w, `${b0.w} → ${r0.w}`)
+    check('关闭吸附后宽度不再被吸到 25 的整数倍', r0.w % 25 !== 0, `w=${r0.w}`)
+    check('关闭吸附后高度不再被吸到 25 的整数倍', r0.h % 25 !== 0, `h=${r0.h}`)
   } finally {
     ws.close()
     chrome.kill()
+    if (ORIG_SCALE !== null) {
+      try { await patch('/api/settings', { scaleSnap: ORIG_SCALE }) } catch { /* 忽略 */ }
+    }
     await post('/api/workspace', { path: origWs })
     rmSync(TMPWS, { recursive: true, force: true })
     try { rmSync(PROFILE, { recursive: true, force: true }) } catch { /* Chrome 可能还占着目录 */ }
@@ -215,7 +273,10 @@ main().catch(async (e) => {
   console.error('ERR', e.message)
   chrome.kill()
   // 兜底：setup 阶段就抛错时，脚本自己的 finally 还没轮到执行 ——
-  // 这里保证工作目录一定被还回去，不会卡在一次性测试目录上
+  // 这里保证工作目录与缩放吸附设置一定被还回去
+  if (ORIG_SCALE !== null) {
+    try { await patch('/api/settings', { scaleSnap: ORIG_SCALE }) } catch { /* 忽略 */ }
+  }
   if (ORIG_WS) {
     try {
       await post('/api/workspace', { path: ORIG_WS })

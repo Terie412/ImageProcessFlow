@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""网格吸附验证。
+"""网格吸附 + 缩放吸附验证。
 
 A 部分：纯函数（不起服务）
   - grid_size / snap_value / snap_up / snap_graph 的行为
   - **优先级**：吸附开着时，整图排版既要落在格点上，间距又不能小于 ROW_GAP_Y
+  - 缩放吸附（§3.16）：区间常量 + 设置项收敛（负数归 0 / 超上限夹住 / 非法值丢弃）
+    —— 「拖出整数倍」是前端的活，那条链路由 runtime/resizetest.js 在真实浏览器里验
 B 部分：打真实实例（默认 8770，可用 IPF_BASE 覆盖），验证
   - PATCH 设置开启吸附 → 整个画布的坐标立刻被收齐
   - 新增输出槽位也落在格点上
+  - 缩放吸附设置项的往返（PATCH → /api/state 里读回来）
 """
 from __future__ import annotations
 
@@ -111,6 +114,26 @@ def part_a() -> None:
               all(gp >= engine_mod.ROW_GAP_Y for gp in gaps), str(gaps))
         check(f"格={gs}: 相邻不重叠", all(gp >= 0 for gp in gaps), str(gaps))
 
+    # ---- 缩放吸附：区间常量 + 设置项收敛。服务端只负责把值洗干净；真正"拖出整数倍"
+    #      是前端的活，那条链路由 runtime/resizetest.js 在真实浏览器里验 ----
+    print("\n[缩放吸附] 区间常量与设置项收敛（服务端只管值合不合法）")
+    check("步长区间 = (0, 200)（0 就是「关闭」，所以下界不是 1）",
+          engine_mod.SCALE_SNAP_RANGE == (0, 200), str(engine_mod.SCALE_SNAP_RANGE))
+    try:
+        import main as main_mod  # noqa: PLC0415
+    except Exception as e:  # noqa: BLE001
+        print(f"  [SKIP] 起不了 main，跳过设置项收敛（{e}）")
+        return
+    check("默认值 10", main_mod.DEFAULT_SETTINGS.get("scaleSnap") == 10,
+          str(main_mod.DEFAULT_SETTINGS.get("scaleSnap")))
+    coerce = main_mod._coerce_setting
+    for raw, want in [(10, 10), ("25", 25), (25.6, 26), (0, 0), (-7, 0), (999, 200)]:
+        got = coerce("scaleSnap", raw, {})
+        check(f"设置收敛：{raw!r} → {want}", got == want, str(got))
+    for raw in (None, "", "abc", []):
+        got = coerce("scaleSnap", raw, {})
+        check(f"非法值 {raw!r} 被丢掉（不会写坏设置）", got is None, str(got))
+
 
 # ------------------------------------------------------ B. 真实实例
 SNAP_SCRIPT = '''\
@@ -146,6 +169,7 @@ def part_b() -> None:
     orig_ws = st0["workspace"]
     orig_snap = st0["settings"].get("snapToGrid")
     orig_grid = st0["settings"].get("gridSize")
+    orig_scale = st0["settings"].get("scaleSnap")
 
     TMPSCRIPT.mkdir(parents=True, exist_ok=True)
     (TMPSCRIPT / "manifest.json").write_text(
@@ -217,10 +241,23 @@ def part_b() -> None:
         # 处理节点自身也回到格点上了吗
         check("处理节点也在格点上", proc["x"] % 5 == 0 and proc["y"] % 5 == 0,
               f"({proc['x']}, {proc['y']})")
+
+        # ---- 缩放吸附：设置项的往返。这个设置**不参与落盘收口**，
+        #      所以只验它自己能不能存能取、脏值会不会被洗干净 ----
+        print("\n[缩放吸附] 设置项的往返")
+        st1 = req("GET", "/api/state")
+        check("下发了 scaleSnapRange = [0, 200]", st1.get("scaleSnapRange") == [0, 200],
+              str(st1.get("scaleSnapRange")))
+        for raw, want in [(25, 25), (0, 0), (-7, 0), (999, 200)]:
+            got = req("PATCH", "/api/settings", {"scaleSnap": raw})["settings"].get("scaleSnap")
+            check(f"PATCH scaleSnap={raw} → {want}", got == want, str(got))
     finally:
         # 关掉吸附并还原现场
         try:
-            req("PATCH", "/api/settings", {"snapToGrid": bool(orig_snap), "gridSize": orig_grid or 5})
+            req("PATCH", "/api/settings", {
+                "snapToGrid": bool(orig_snap), "gridSize": orig_grid or 5,
+                "scaleSnap": orig_scale if orig_scale is not None else 10,
+            })
         except Exception:  # noqa: BLE001
             pass
         shutil.rmtree(TMPSCRIPT, ignore_errors=True)

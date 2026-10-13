@@ -1023,3 +1023,9 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 }
 .viewer-measure .viewer-size { font-weight: 500; }
 .viewer-measure .viewer-origin { color: var(--muted); }
+
+/* 设置项下面的一句说明（例：缩放吸附的「0 或负数 = 关闭」）。
+   比字段标签再淡一档，不抢视线 —— 这类补充说明只在需要时被读到。 */
+.settings-pop .set-note {
+  padding: 0 9px 5px; color: var(--muted); font-size: 10.5px; line-height: 1.5;
+}

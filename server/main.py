@@ -66,6 +66,9 @@ DEFAULT_SETTINGS: dict = {
     "snapToGrid": True,
     # 吸附格大小（px）
     "gridSize": 5,
+    # 缩放吸附：拖节点右下角改大小时，宽高吸到它的整数倍。
+    # **0 或负数 = 关闭**（负数统一归到 0）；单位是 px，默认 10。
+    "scaleSnap": 10,
     # 节点尺寸：**唯一一份**配置，见 server/nodespec.py。
     # 两个表形状一致，key 都是 resource / process:<defId> / process：
     #   nodeSize → **初始尺寸**（节点没被拖过右下角手柄时该多大）
@@ -145,6 +148,15 @@ def _coerce_setting(key: str, value, current: dict):
         except (TypeError, ValueError):
             return None
         lo, hi = engine_mod.GRID_SIZE_RANGE
+        return max(lo, min(hi, n))
+    if key == "scaleSnap":
+        # 允许 "10" / 10 / 10.4 这类写法，取整后夹到区间内。
+        # **0 与负数都是「关闭」**，统一归到 0（下界就是 0），免得状态有两种写法
+        try:
+            n = int(round(float(value)))
+        except (TypeError, ValueError):
+            return None
+        lo, hi = engine_mod.SCALE_SNAP_RANGE
         return max(lo, min(hi, n))
     if isinstance(value, type(DEFAULT_SETTINGS[key])):
         return value.strip() if isinstance(value, str) else value
@@ -474,6 +486,8 @@ def state_payload() -> dict:
         "sizeSpec": nodespec.resolve_types(STATE["registry"], STATE["settings"]),
         # 宽高的允许区间，前端表单的 min/max 直接用它，不再自己写
         "sizeRange": list(nodespec.SIZE_RANGE),
+        # 「缩放吸附」步长的允许区间（同一个理由：只留服务端一份）
+        "scaleSnapRange": list(engine_mod.SCALE_SNAP_RANGE),
         "settings": dict(STATE["settings"]),
     }
 

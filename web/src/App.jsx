@@ -55,6 +55,17 @@ const clampGrid = (v) => {
   return Math.max(GRID_RANGE[0], Math.min(GRID_RANGE[1], Math.round(n)))
 }
 
+/* 缩放吸附：拖节点右下角改大小时，宽高吸到它的整数倍。**0 = 关闭**（负数也算关闭）。
+   区间与服务端 engine.SCALE_SNAP_RANGE 一致；输入框的 min/max 用服务端下发的
+   `scaleSnapRange`，这里只是服务端没答上来时的兜底。 */
+const SCALE_SNAP_RANGE = [0, 200]
+const SCALE_SNAP_DEFAULT = 10
+const clampScaleSnap = (v) => {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return null
+  return Math.max(SCALE_SNAP_RANGE[0], Math.min(SCALE_SNAP_RANGE[1], Math.round(n)))
+}
+
 /*
  * 尺寸规格按「具体节点类型」索引，与服务端的 `settings.nodeSize` / `settings.nodeMin`
  * 完全同一套 key（`resource` / `process:<defId>` / `process` 兜底）：
@@ -611,9 +622,22 @@ export default function App() {
       const startW = box?.offsetWidth || minW
       const startH = box?.offsetHeight || minH
       const zoom = getZoom() || 1
+      // 缩放吸附：宽高吸到 step 的整数倍（和网格吸附同一个「就近」口径）。
+      // 从 ref 里取而不是走 useCallback 依赖 —— 拖一次就要重建回调不值当。
+      const step = clampScaleSnap(stateRef.current?.settings?.scaleSnap) || 0
       // clientX 是屏幕像素，节点尺寸是画布坐标，要除以缩放
-      const sizeW = (v) => Math.max(minW, Math.round(v))
-      const sizeH = (v) => Math.max(minH, Math.round(v))
+      /* 先按**原始拖拽量**算出尺寸，再就近吸附（不是累加着吸 —— 那样会有累积误差）。
+         `min` 是硬下限，优先级高于吸附：最小尺寸自己不是步长整数倍时（比如
+         min=560、step=25），吸出来的值会比下限还小，这时退回未吸附的值，
+         绝不让节点缩到最小值以下。 */
+      const fit = (v, min) => {
+        const raw = Math.max(min, Math.round(v))
+        if (step <= 0) return raw
+        const snapped = Math.round(raw / step) * step
+        return snapped >= min ? snapped : raw
+      }
+      const sizeW = (v) => fit(v, minW)
+      const sizeH = (v) => fit(v, minH)
       let last = { w: startW, h: startH }
 
       const onMove = (ev) => {
@@ -910,11 +934,28 @@ export default function App() {
     [gridSize, saveSetting],
   )
 
+  /* ---- 缩放吸附：步长同样是一个失焦才提交的草稿。
+     它只在**拖节点右下角改尺寸**那一刻生效（管尺寸，不是管位置） ---- */
+  const [scaleDraft, setScaleDraft] = useState(null)
+  const scaleRange = state?.scaleSnapRange || SCALE_SNAP_RANGE
+  const scaleSnap = clampScaleSnap(state?.settings?.scaleSnap ?? SCALE_SNAP_DEFAULT) ?? SCALE_SNAP_DEFAULT
+
+  const commitScaleSnap = useCallback(
+    (raw) => {
+      setScaleDraft(null) // 清掉草稿 → 输入框退回显示服务端的值（被归一过的那个）
+      const v = clampScaleSnap(raw)
+      if (v === null || v === scaleSnap) return
+      saveSetting('scaleSnap', v)
+    },
+    [scaleSnap, saveSetting],
+  )
+
   const toggleSettings = useCallback(() => {
     // 打开时清空草稿：输入框会直接显示服务端的当前值
     if (!showSettings) {
       setSizeDraft({})
       setGridDraft(null)
+      setScaleDraft(null)
     }
     setShowSettings((v) => !v)
   }, [showSettings])
@@ -1318,6 +1359,28 @@ export default function App() {
                     <span className="set-x">px</span>
                   </div>
                 </label>
+
+                <div className="set-sep" />
+                <div className="set-group">缩放吸附</div>
+                <label className="set-field">
+                  <span>拖右下角改大小时吸附</span>
+                  <div className="set-size">
+                    <input
+                      type="number"
+                      min={scaleRange[0]}
+                      max={scaleRange[1]}
+                      step={1}
+                      value={scaleDraft ?? scaleSnap}
+                      onChange={(e) => setScaleDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                      onBlur={(e) => commitScaleSnap(e.target.value)}
+                    />
+                    <span className="set-x">px</span>
+                  </div>
+                </label>
+                <div className="set-note">
+                  0 或负数 = 关闭；大于 0 时节点宽高只能是它的整数倍
+                </div>
 
                 <div className="set-sep" />
                 <div className="set-group">节点尺寸</div>
