@@ -412,6 +412,7 @@ def _decorate(g: dict, canvas_id: str | None = None) -> dict:
         r["width"] = None
         r["height"] = None
         r["format"] = None
+        r["alpha"] = None
         if w is not None and canvas_id:
             p = w.image_path(canvas_id, r.get("name", ""))
             if p is not None:
@@ -424,6 +425,12 @@ def _decorate(g: dict, canvas_id: str | None = None) -> dict:
                         with _PILImage.open(p) as im:
                             r["width"], r["height"] = im.size
                             r["format"] = (im.format or "").upper() or None
+                            # 有没有**实际的**透明通道 —— 大图查看器的像素读数据此
+                            # 决定显示 RGBA 还是 RGB（判据与 recolor/resize 一致：
+                            # 看 mode，不看文件格式 —— RGB 模式的 PNG 也算「没有」）
+                            r["alpha"] = im.mode in ("RGBA", "LA") or (
+                                im.mode == "P" and "transparency" in im.info
+                            )
                     except Exception:  # noqa: BLE001
                         pass
         r["w"], r["h"] = nodespec.size_of(r, kind="resource", settings=settings)

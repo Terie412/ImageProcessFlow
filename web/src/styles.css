@@ -724,6 +724,33 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   color: var(--muted); font-size: 12px;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+/* 光标下那一像素的读数（顶栏里实时更新）。宽度兜底，免得数字变化把右侧按钮顶得乱跳 */
+.viewer-pixel {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  min-width: 348px; justify-content: flex-end;
+}
+.viewer-pixel .viewer-idle { color: var(--muted); }
+/* 色块：里面垫一层棋盘格，上面的 rgba 色块按自身 alpha 叠加 —— 半透明的像素
+   一眼能看出透出多少 */
+.viewer-swatch {
+  position: relative; flex: 0 0 auto;
+  width: 14px; height: 14px; border-radius: 3px; overflow: hidden;
+  border: 1px solid var(--line);
+  background-color: #22262d;
+  background-image:
+    linear-gradient(45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(-45deg, #2f353f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2f353f 75%),
+    linear-gradient(-45deg, transparent 75%, #2f353f 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+.viewer-swatch > i { position: absolute; inset: 0; display: block; }
+.viewer-pixel .viewer-xy { color: var(--muted); min-width: 76px; text-align: right; }
+.viewer-pixel .viewer-rgb { min-width: 172px; text-align: right; }
+.viewer-pixel .viewer-hex { color: var(--muted); min-width: 62px; text-align: right; }
 .viewer-stage {
   position: absolute; inset: 46px 0 0; overflow: auto;
   cursor: default;                     /* 点哪儿都不再关窗口了，所以不再是 zoom-out */

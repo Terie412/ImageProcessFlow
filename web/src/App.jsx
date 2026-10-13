@@ -54,6 +54,9 @@ const clampGrid = (v) => {
   return Math.max(GRID_RANGE[0], Math.min(GRID_RANGE[1], Math.round(n)))
 }
 
+// 查看器像素读数用：0~255 → 两位十六进制
+const hex2 = (v) => v.toString(16).padStart(2, '0')
+
 /*
  * 尺寸规格按「具体节点类型」索引，与服务端的 `settings.nodeSize` / `settings.nodeMin`
  * 完全同一套 key（`resource` / `process:<defId>` / `process` 兜底）：
@@ -192,6 +195,7 @@ export default function App() {
   const [viewer, setViewer] = useState(null) // 双击数据节点打开的大图查看器
   const [viewerFit, setViewerFit] = useState(true) // 查看器：适应窗口 / 实际像素
   const [viewerSize, setViewerSize] = useState(null) // 滚轮缩放后的显式尺寸；null = 交给 CSS
+  const [viewerPixel, setViewerPixel] = useState(null) // 光标下那一像素 {x,y,r,g,b,a}；不在图上时 null
   const [editing, setEditing] = useState(null) // 裁剪区域编辑器 { pid, image, regions }
 
   const canvasRef = useRef(null)
@@ -199,6 +203,9 @@ export default function App() {
   const viewerStageRef = useRef(null)
   const viewerImgRef = useRef(null)
   const viewerAnchorRef = useRef(null)
+  // 把查看器里的图原样画进一块离屏 canvas，鼠标移动时按图内坐标取那一个像素。
+  // 只读同一张图的一次绘制结果，缩放/平移都不用重画（图内容没变）。
+  const viewerCanvasRef = useRef(null)
   const replaceRef = useRef(null)
   const replaceTarget = useRef(null)
   const importAt = useRef(null)
@@ -738,15 +745,59 @@ export default function App() {
     if (node?.type !== 'resource' || !d?.hasImage) return
     setViewerFit(true)
     setViewerSize(null)
+    setViewerPixel(null)
+    viewerCanvasRef.current = null // 新图要重新画一次，别拿着上一张的像素表
     setViewer({
       name: d.name,
       mtime: d.mtime,
       width: d.width,
       height: d.height,
       format: d.format,
+      alpha: d.alpha,
       kind: d.kind,
       index: d.index,
     })
+  }, [])
+
+  /* 查看器：把图原样画进离屏 canvas（只画一次），供像素读数查表。
+     用 naturalWidth/Height 建画布 = 图内像素坐标，和渲染缩放无关。 */
+  const captureViewerImage = useCallback(() => {
+    const img = viewerImgRef.current
+    if (!img || !img.complete || !img.naturalWidth) return
+    const c = document.createElement('canvas')
+    c.width = img.naturalWidth
+    c.height = img.naturalHeight
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return
+    ctx.drawImage(img, 0, 0)
+    viewerCanvasRef.current = c
+  }, [])
+
+  const onViewerImgLoad = useCallback(() => captureViewerImage(), [captureViewerImage])
+
+  // 命中浏览器缓存时，load 事件可能早于 React 绑定（甚至根本不派发），这里兜一次
+  useEffect(() => {
+    if (viewer) captureViewerImage()
+  }, [viewer, captureViewerImage])
+
+  /* 光标在图内 → 换算出图内像素坐标，读那一个像素（RGBA）。
+     1×1 的 getImageData 而不是缓存整张：大图（比如 2735×365、甚至上万边）
+     全缓存动辄几十 MB，逐点读既省内存又够快。 */
+  const onViewerMove = useCallback((ev) => {
+    const c = viewerCanvasRef.current
+    if (!c || !c.width || !c.height) return
+    const r = ev.currentTarget.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return
+    const x = Math.floor(((ev.clientX - r.left) / r.width) * c.width)
+    const y = Math.floor(((ev.clientY - r.top) / r.height) * c.height)
+    if (x < 0 || y < 0 || x >= c.width || y >= c.height) {
+      setViewerPixel(null)
+      return
+    }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    const d = ctx.getImageData(x, y, 1, 1).data
+    setViewerPixel({ x, y, r: d[0], g: d[1], b: d[2], a: d[3] })
   }, [])
 
   /* 查看器里滚轮缩放：以光标为锚点，缩放后把滚动位置挪回去 */
@@ -1627,6 +1678,40 @@ export default function App() {
               {viewer.kind === 'input' ? '输入图' : `输出 #${(viewer.index ?? 0) + 1}`}
             </span>
             <span className="spacer" />
+            {/* 光标下那一像素的通道值（图内像素坐标）。没有 alpha 通道的图只显示 RGB */}
+            <span
+              className="viewer-pixel"
+              title="把鼠标移到图上，这里显示光标处像素的通道值"
+            >
+              {viewerPixel ? (
+                <>
+                  <span className="viewer-swatch">
+                    <i
+                      style={{
+                        backgroundColor: `rgba(${viewerPixel.r},${viewerPixel.g},${
+                          viewerPixel.b
+                        },${(viewerPixel.a / 255).toFixed(3)})`,
+                      }}
+                    />
+                  </span>
+                  <span className="viewer-xy">
+                    {viewerPixel.x}, {viewerPixel.y}
+                  </span>
+                  <span className="viewer-rgb">
+                    R {viewerPixel.r} G {viewerPixel.g} B {viewerPixel.b}
+                    {viewer.alpha ? ` A ${viewerPixel.a}` : ''}
+                  </span>
+                  <span className="viewer-hex">
+                    #{hex2(viewerPixel.r)}
+                    {hex2(viewerPixel.g)}
+                    {hex2(viewerPixel.b)}
+                    {viewer.alpha ? hex2(viewerPixel.a) : ''}
+                  </span>
+                </>
+              ) : (
+                <span className="viewer-idle">像素 —</span>
+              )}
+            </span>
             <span className="viewer-meta">
               {viewer.width && viewer.height ? `${viewer.width} × ${viewer.height}` : null}
               {viewer.format ? ` · ${viewer.format}` : null}
@@ -1651,6 +1736,9 @@ export default function App() {
               alt={viewer.name}
               draggable={false}
               title="滚轮缩放 · 中键拖动平移 · 双击切换「适应窗口 / 实际大小」"
+              onLoad={onViewerImgLoad}
+              onMouseMove={onViewerMove}
+              onMouseLeave={() => setViewerPixel(null)}
               onDoubleClick={() => {
                 setViewerSize(null)
                 setViewerFit((v) => !v)
