@@ -424,6 +424,24 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   width: 38px; height: 24px; padding: 2px;
   cursor: pointer;
 }
+/* 滑块参数（色彩平衡节点的两条色偏轴）：压掉 .cfg-field input 的输入框外观，
+   只留轨道 —— 否则 range 会顶着一个带边框的背景块，很难看 */
+.cfg-field input.cfg-slider {
+  flex: 1 1 auto; min-width: 0;
+  height: 16px; padding: 0;
+  background: transparent; border: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cfg-field input.cfg-slider:focus { border: 0; }
+/* 滑块右边的读数：定宽 + 等宽数字。不定宽的话，从 0 拖到 +12 时
+   整行宽度会跳一下；不用 tabular-nums 则数字会左右晃 */
+.cfg-num {
+  flex: 0 0 30px; text-align: right;
+  font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 开关组：整体作为一个可折行的单元，不会把某一项单独甩到下一行 */
 .cfg-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; flex: 0 1 auto; }
 .cfg-check { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }

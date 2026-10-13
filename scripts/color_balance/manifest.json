@@ -1,0 +1,52 @@
+{
+  "id": "color_balance",
+  "name": "色彩平衡",
+  "entry": "color_balance.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "输入图",
+      "count": 1,
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "warm",
+      "type": "slider",
+      "default": 0,
+      "min": -50,
+      "max": 50,
+      "step": 1,
+      "label": "黄 ↔ 蓝",
+      "width": "full"
+    },
+    {
+      "key": "tint",
+      "type": "slider",
+      "default": 0,
+      "min": -50,
+      "max": 50,
+      "step": 1,
+      "label": "绿 ↔ 品红",
+      "width": "full"
+    },
+    {
+      "key": "keepLuma",
+      "type": "bool",
+      "default": true,
+      "label": "保持亮度"
+    }
+  ],
+  "outputs": [{ "key": "image", "type": "image", "multi": true }],
+
+  "_note": "把整张图的色调沿两条色偏轴整体平移：正数往黄/绿推、负数往蓝/品红推，画面内容与明暗层次都不动。两个值都是 0 时原样复制（不重新编码）。多输入逐张独立处理，几张进几张出。",
+  "size": {
+    "defaultWidth": 560,
+    "defaultHeight": 280
+  }
+}

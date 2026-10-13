@@ -430,6 +430,35 @@ export default function ProcessNode({ id, data, selected }) {
               ))}
 
             {others
+              .filter((s) => s.type === 'slider')
+              .map((s) => {
+                // 滑块（色彩平衡的两条色偏轴）：拖动全程只走本地 setNodes，
+                // 落盘由 App.pushParam 那层 500ms 防抖兜着，这里不用再防抖。
+                const lo = Number(s.min ?? 0)
+                const hi = Number(s.max ?? 100)
+                const raw = Number(params[s.key])
+                const val = Number.isFinite(raw)
+                  ? Math.min(hi, Math.max(lo, raw))
+                  : Number(s.default ?? lo)
+                return (
+                  <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
+                    <span className="cfg-label">{s.label || s.key}</span>
+                    <input
+                      className="nodrag nopan cfg-slider"
+                      type="range"
+                      min={lo}
+                      max={hi}
+                      step={s.step ?? 1}
+                      value={val}
+                      onChange={(e) => onParam(id, s.key, Number(e.target.value))}
+                    />
+                    {/* 读数定宽 + 等宽数字：拖动时整行宽度不会随位数变化而抖 */}
+                    <span className="cfg-num">{val > 0 ? `+${val}` : `${val}`}</span>
+                  </label>
+                )
+              })}
+
+            {others
               .filter((s) => s.type === 'color')
               .map((s) => {
                 // 原生取色控件只认 #RRGGBB；历史值不合法时兜成黑，别让 React 报警
