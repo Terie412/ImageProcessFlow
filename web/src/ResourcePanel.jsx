@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from './api'
 
@@ -8,6 +8,10 @@ import * as api from './api'
  * 带上这个类型时 dataTransfer.files 是空的，所以两条路不会同时命中。
  * 值就是相对资源目录的路径 —— 落点时服务端据此直接复制，不经浏览器上传。 */
 export const RESOURCE_DRAG_MIME = 'application/x-ipf-resource'
+
+/* 面板宽度可以拖右边框改，纯界面偏好 —— 记 localStorage，不进 graph.json */
+const RES_W = { min: 180, max: 640, def: 262 }
+const clampW = (v) => Math.max(RES_W.min, Math.min(RES_W.max, Math.round(v)))
 
 const fmtSize = (n) => {
   if (!Number.isFinite(n)) return ''
@@ -122,6 +126,60 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   const [dlg, setDlg] = useState(null)     // { kind:'mkdir'|'rename'|'delete', … }
   const [dlgErr, setDlgErr] = useState('')
   const [busyAct, setBusyAct] = useState(false)
+
+  // 面板宽度（可拖右边框改，记 localStorage）
+  const [width, setWidth] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem('ipf.resWidth'))
+      return Number.isFinite(v) && v > 0 ? clampW(v) : RES_W.def
+    } catch (e) {
+      return RES_W.def
+    }
+  })
+  const [dragging, setDragging] = useState(false)
+  const widthRef = useRef(width)
+  useEffect(() => {
+    widthRef.current = width
+  }, [width])
+
+  const saveWidth = (w) => {
+    try {
+      localStorage.setItem('ipf.resWidth', String(w))
+    } catch (e) {
+      /* 隐私模式下写不了，忽略 */
+    }
+  }
+
+  // 拖右边缘改宽度：mousemove 只改 state（不落盘），松手才写 localStorage
+  const startResize = (e) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    let latest = widthRef.current
+    let x0 = e.clientX
+    const w0 = latest
+    setDragging(true)
+    document.body.classList.add('col-resizing')
+    const move = (ev) => {
+      // 上限还要看窗口：别把画布挤得没地方
+      const max = Math.max(RES_W.min, Math.min(RES_W.max, window.innerWidth - 240))
+      latest = Math.max(RES_W.min, Math.min(max, Math.round(w0 + (ev.clientX - x0))))
+      setWidth(latest)
+    }
+    const up = () => {
+      setDragging(false)
+      document.body.classList.remove('col-resizing')
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      saveWidth(latest)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  const resetWidth = () => {
+    setWidth(RES_W.def)
+    saveWidth(RES_W.def)
+  }
 
   const load = useCallback(async (rel) => {
     setTree((t) => ({ ...t, [rel]: { status: 'loading', entries: [], error: '' } }))
@@ -265,7 +323,7 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   if (!open) return null
 
   return (
-    <aside className="res-panel">
+    <aside className="res-panel" style={{ width }}>
       <div className="res-head">
         <span className="res-title">资源</span>
         {dir ? (
@@ -452,6 +510,14 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
             document.body,
           )
         : null}
+
+      {/* 右边缘：拖动改宽度，双击恢复默认 */}
+      <div
+        className={`res-resizer${dragging ? ' on' : ''}`}
+        title="拖动调整面板宽度（双击恢复默认）"
+        onMouseDown={startResize}
+        onDoubleClick={resetWidth}
+      />
     </aside>
   )
 }
