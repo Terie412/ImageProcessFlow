@@ -58,6 +58,10 @@ DEFAULT_SETTINGS: dict = {
     "textModelName": "deepseek-v4-flash-vision-exp",
     # 上次打开过的工作目录：下次启动自动打开，省得每次都要重选一遍
     "lastWorkspace": "",
+    # 上次「下载」到的**目录**（应用级、跨节点、跨工作目录）。给那些还没下载过的
+    # 数据节点用：它们点「下载」时对话框默认落到最近保存过的地方，而不是工作目录根
+    # —— 图片往往就存在同一个目录下的不同文件里。
+    "lastExportDir": "",
     # 网格吸附：开启后拖动节点会吸到格点上，落盘的坐标也一律对齐到格点
     "snapToGrid": True,
     # 吸附格大小（px）
@@ -831,9 +835,26 @@ def _export_remember_path(node: dict | None) -> str:
 
     记忆**只有一个字段** `lastExportPath`（完整路径，含文件名）—— 早期版本只记目录
     (`lastExportDir`)，那会儿前端拿不到完整路径，也就没法做「覆盖」。两套字段并存
-    会导致「旧代码写了目录、新前端只认路径」这种看不见的空档，所以目录字段已删除。
+    会导致「旧代码写了目录、新前端只认路径」这种看不见的空档，所以**节点上的**目录
+    字段已删除。
+
+    > 别和 `settings.lastExportDir` 搞混：那个是**应用级**的「上次下载到哪个目录」，
+    > 一份、跨节点，专门给「还没有位置记忆」的节点兜底（见 `_export_fallback_dir`）。
     """
     return ((node or {}).get("lastExportPath") or "").strip()
+
+
+def _export_fallback_dir() -> Path:
+    """「没记过位置」的数据节点点「下载」时，对话框默认落在哪。
+
+    优先用**全局记录**的上次下载目录（`settings.lastExportDir`）—— 图片往往存在
+    同一个目录下的不同文件里，所以新节点直接落到最近保存过的地方就够了。
+    没记录过、或记的目录已经不在（被删 / 外置盘拔了），才退回工作目录根。
+    """
+    glob = (STATE["settings"].get("lastExportDir") or "").strip()
+    if glob and Path(glob).is_dir():
+        return Path(glob)
+    return ws().root
 
 
 def _export_save_as(
@@ -841,8 +862,13 @@ def _export_save_as(
 ) -> str | None:
     """弹另存为，写回记忆。返回落点；用户取消返回 None。
 
-    对话框的初始目录优先落在记忆路径的父目录，其次工作目录根；初始文件名带上记忆里
-    的文件名 —— 用户可能把下载出去的那份改过名，再点「下载」时默认回到那个名字。
+    对话框的初始目录：先看这个节点自己记的父目录；没有就落到 `fallback_dir`
+    （= `_export_fallback_dir()`：全局记录的上次下载目录，最后才是工作目录根）。
+    初始文件名带上记忆里的文件名 —— 用户可能把下载出去的那份改过名，再点「下载」时
+    默认回到那个名字。
+
+    保存成功后**两处都更新**：节点自己的 `lastExportPath`（完整路径），以及全局的
+    `settings.lastExportDir`（目录，供以后那些还没有位置记忆的节点用）。
     """
     mem_dir = Path(remembered).parent if remembered else None
     initial_dir = str(mem_dir) if (mem_dir and mem_dir.is_dir()) else str(fallback_dir)
@@ -854,6 +880,9 @@ def _export_save_as(
     if not dest:
         return None
     shutil.copy2(src, dest)
+    # 全局记录：下次任何「还没记过位置」的节点下载，默认落到这个目录
+    STATE["settings"]["lastExportDir"] = str(Path(dest).parent)
+    save_settings(STATE["settings"])
     if node is not None:
         node["lastExportPath"] = str(dest)
         persist()
@@ -865,8 +894,11 @@ def api_export(payload: dict):
     """把当前画布里的一张图复制到用户指定的位置（UI 上叫「下载」）。
 
     每个数据节点**自己记住**上次下载到了**哪个完整路径**（存进 graph.json 里该节点的
-    lastExportPath 字段），下次点「下载」时对话框直接定位到那个文件所在目录；没记过、
-    或记的目录已不存在，就退回工作目录根。
+    lastExportPath 字段），下次点「下载」时对话框直接定位到那个文件所在目录。
+
+    **没记过**的节点（或记的目录已不存在）：落到**全局记录**的上次下载目录
+    （`settings.lastExportDir`）—— 图片往往存在同一个目录下的不同文件里，所以新节点
+    默认落在最近保存过的地方，最后才退回工作目录根。见 `_export_fallback_dir`。
 
     节点删了记忆也就没了，跨画布复制粘贴不会把这条记忆带过去（粘贴出来的是新节点）。
     """
@@ -877,7 +909,7 @@ def api_export(payload: dict):
     if src is None:
         raise HTTPException(404, f"图片不存在: {name}")
     node = engine_mod._resource(graph(), resource_id) if resource_id else None  # noqa: SLF001
-    dest = _export_save_as(node, _export_remember_path(node), src, ws().root)
+    dest = _export_save_as(node, _export_remember_path(node), src, _export_fallback_dir())
     if dest is None:
         return {"cancelled": True}
     return {"ok": True, "saved": dest, "modified": False}
@@ -906,7 +938,7 @@ def api_overwrite(payload: dict):
 
     # 记忆失效（没记过 / 文件被删被移 / 外置盘拔了）→ 按「下载」走另存为
     if not remembered or not Path(remembered).is_file():
-        dest = _export_save_as(node, remembered, src, ws().root)
+        dest = _export_save_as(node, remembered, src, _export_fallback_dir())
         if dest is None:
             return {"cancelled": True}
         return {"ok": True, "saved": dest, "modified": True}
