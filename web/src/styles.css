@@ -275,8 +275,10 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 
 .node-foot {
   display: flex; align-items: center; gap: 6px;
-  /* 底部留出一条空带给右下角的缩放手柄，否则它会压在按钮上 */
-  padding: 10px 10px 18px 9px;
+  /* 右侧留出 12px 给右下角的缩放手柄（手柄现在贴在**真正的角**上，见 .resize-handle）。
+     这里**不再留底部空带** —— 手柄是 position: absolute，本来就不占布局，
+     原先那条 18px 底部内边距是纯浪费（数据节点上尤其明显）。 */
+  padding: 10px 20px 10px 9px;
 }
 .node-foot button.primary { flex: 1 1 auto; }
 .node-foot button.tiny { flex: 0 0 auto; }
@@ -831,10 +833,12 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 /* ---------------- 节点缩放手柄（右下角一个小方块） ---------------- */
 /* 右下角的缩放手柄：**完全不可见**，只靠 cursor: nwse-resize 提示（和资源面板右侧的
    拖宽手柄同一个做法 —— 用户明确不要那个方块）。
-   尺寸和位置都**别动**：`node-foot` 底下那 18px 空带就是按 12 + 3 留的，
-   一放大手柄就会压到「执行」按钮上。 */
+
+   位置**钉在真正的右下角**（right/bottom: 0，即内边框处），所以它不占任何布局空间，
+   也不压任何按钮（`.node-foot` 右侧留了 20px，比它宽 12px 多出 8px 缝）。
+   别改回 3px 内缩 + 底部空带那套：那是为了「手柄在按钮下方」而白占一整条高度。 */
 .resize-handle {
-  position: absolute; right: 3px; bottom: 3px; z-index: 5;
+  position: absolute; right: 0; bottom: 0; z-index: 5;
   width: 12px; height: 12px;
   cursor: nwse-resize;
   touch-action: none;

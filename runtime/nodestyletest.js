@@ -225,17 +225,26 @@ async function main() {
     }
     const footBox = await J(`(() => {
       const node = document.querySelector('${sel(pid)}')
-      const f = node.querySelector('.node-foot').getBoundingClientRect()
+      const nr = node.getBoundingClientRect()
       const b = node.querySelector('.node-foot button').getBoundingClientRect()
       const h = node.querySelector('.resize-handle').getBoundingClientRect()
       return JSON.stringify({
-        按钮离节点底: Math.round(f.bottom - b.bottom),
-        按钮底到手柄顶: Math.round(h.top - b.bottom),
-        手柄底离节点底: Math.round(f.bottom - h.bottom),
+        按钮底离节点底: Math.round(nr.bottom - b.bottom),
+        按钮右到手柄左: Math.round(h.left - b.right),
+        手柄右离节点右: Math.round(nr.right - h.right),
+        手柄底离节点底: Math.round(nr.bottom - h.bottom),
       })
     })()`)
-    console.log(`   按钮底边离节点底 ${footBox.按钮离节点底}px · 按钮底边到手柄顶 ${footBox.按钮底到手柄顶}px · 手柄底边离节点底 ${footBox.手柄底离节点底}px`)
-    check('手柄整体在按钮下方', footBox.按钮底到手柄顶 >= 1, `间隙 ${footBox.按钮底到手柄顶}px`)
+    console.log(
+      `   按钮底边离节点底 ${footBox.按钮底离节点底}px · 按钮右边到手柄左边 ${footBox.按钮右到手柄左}px · ` +
+      `手柄右下角离节点右下角 ${footBox.手柄右离节点右}px / ${footBox.手柄底离节点底}px`,
+    )
+    check(
+      '手柄贴在节点右下角（不占布局）',
+      footBox.手柄右离节点右 <= 2 && footBox.手柄底离节点底 <= 2,
+      `${footBox.手柄右离节点右} / ${footBox.手柄底离节点底}`,
+    )
+    check('按钮与手柄之间留了缝，不抢位置', footBox.按钮右到手柄左 >= 4, `缝隙 ${footBox.按钮右到手柄左}px`)
 
     console.log('\n[2] 配置区排布')
     const rows = await cfgRows(pid)
