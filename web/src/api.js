@@ -76,6 +76,19 @@ export const importImage = async (file, { resourceId = '', x = 0, y = 0 } = {}) 
   return fetch('/api/resources/import', { method: 'POST', body: fd }).then(J)
 }
 
+/* 资源目录（工作目录之外的只读素材来源，路径跟随工作目录存在 graph.json 里）。
+   列表是**懒加载**的：path 是相对资源目录根的路径，"" 表示根目录。 */
+export const setResourceDir = (path) => post('/api/resourcedir', { path })
+export const pickResourceDir = () => post('/api/resourcedir/pick')
+export const listResourceDir = (path) =>
+  fetch(`/api/resourcedir/list?path=${encodeURIComponent(path || '')}`).then(J)
+// 从资源目录里取一个文件拖进画布 = 服务端直接**复制**一份进当前画布（不上传）
+export const importFromResource = (path, x, y) =>
+  post('/api/resources/import-from-resource', { path, x, y })
+// 面板里的缩略图：只读地取资源目录里的原文件，交给浏览器缩放
+export const resourceRawUrl = (path, mtime) =>
+  `/api/resourcedir/raw?path=${encodeURIComponent(path || '')}&v=${mtime || 0}`
+
 /* 图片池是按画布分的，所以取图**必须带画布 id** ——
    两个画布各有一个 A 是完全正常的，少了 id 会把别的画布的 A 拿过来 */
 export const imageUrl = (canvasId, name, mtime) =>

@@ -147,7 +147,9 @@ class Workspace:
     def fresh_doc(self) -> dict:
         c = empty_canvas("画布 1")
         self.image_dir(c["id"], create=True)
-        return {"version": DOC_VERSION, "current": c["id"], "canvases": [c]}
+        # resourceDir：资源目录（工作目录之外的只读素材来源）。**跟随工作目录** ——
+        # 存在这份文档里，所以每个项目自带一个资源目录（见 DESIGN.md §2.4 / 资源目录一节）。
+        return {"version": DOC_VERSION, "current": c["id"], "resourceDir": "", "canvases": [c]}
 
     def migrate_v1(self, raw: dict | None) -> dict:
         """v1 → v2：老画布成为「画布 1」，顶层 images/ 整体挪进它的池子。"""
@@ -156,7 +158,7 @@ class Workspace:
             v = (raw or {}).get(k)
             c[k] = v if isinstance(v, list) else []
         self._move_legacy_images(self.image_dir(c["id"], create=True))
-        return {"version": DOC_VERSION, "current": c["id"], "canvases": [c]}
+        return {"version": DOC_VERSION, "current": c["id"], "resourceDir": "", "canvases": [c]}
 
     def _move_legacy_images(self, dst: Path) -> int:
         """把 v1 的顶层 images/ 里的文件挪进画布池。
@@ -195,6 +197,10 @@ class Workspace:
         老 v2 文件（少字段）和手改过的文件都会经过这里，所以读进来的一定是完整形状。
         """
         doc["version"] = DOC_VERSION
+        # 资源目录：老文档没有这个字段，补一个空串（未指定）。它**跟随工作目录**，
+        # 所以和 current 一样是文档级字段，不是每个画布一份。
+        if not isinstance(doc.get("resourceDir"), str):
+            doc["resourceDir"] = ""
         seen: set[str] = set()
         canvases: list[dict] = []
         for i, c in enumerate(doc.get("canvases") or []):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -456,6 +457,9 @@ def state_payload() -> dict:
     return {
         "workspace": str(w.root) if w is not None else None,
         "workspaceDir": str(w.root) if w is not None else None,
+        # 资源目录（工作目录之外的只读素材来源，跟随工作目录存在 graph.json 里）。
+        # 空串 = 还没指定，前端据此显示「选择资源目录」。
+        "resourceDir": d.get("resourceDir") or "",
         "canvasId": d["current"],
         "canvases": canvas_list(d),
         "graph": _decorate(graph(), d["current"]),
@@ -938,6 +942,183 @@ def api_image(name: str):
     if p is None:
         raise HTTPException(404, "图片不存在")
     return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+
+# --------------------------------------------------------------------------
+# 资源目录：工作目录之外的**只读**素材来源
+#
+# 与工作目录的沙箱规则（§2.4「绝不操作工作目录以外的文件」）的唯一例外：
+# 这里**只读** —— 只允许列目录 / 读文件，绝不写、改、删资源目录里的任何东西。
+# 把它拖进画布 = 把文件**复制一份**进当前画布的图片池（原文件不动），
+# 与「从外部拖入图片」走同一条语义。
+#
+# 路径存进工作目录的 graph.json（`resourceDir`），所以它**跟随工作目录** ——
+# 先有工作目录、再在其中指定资源目录，换项目就换一套素材来源。
+# --------------------------------------------------------------------------
+def _resource_root() -> Path:
+    """资源目录根（已解析）。没指定 / 目录不存在时抛 400。"""
+    raw = (doc().get("resourceDir") or "").strip()
+    if not raw:
+        raise HTTPException(400, "尚未指定资源目录")
+    root = Path(raw)
+    if not root.is_dir():
+        raise HTTPException(400, f"资源目录不存在：{raw}")
+    return root.resolve()
+
+
+def _resource_path(rel: str) -> Path:
+    """把资源目录内的**相对路径**解析成绝对路径，并挡住越界。
+
+    解析（`resolve()`）之后再检查是否真在根目录之下 —— `..` 上跳、绝对路径、
+    以及指向目录外的符号链接，都会在这里被拒。这是这块唯一的防线，别绕过它。
+    """
+    root = _resource_root()
+    rel = (rel or "").strip().replace("\\", "/")
+    if rel.startswith("/") or re.match(r"^[A-Za-z]:", rel):
+        raise HTTPException(400, "只接受资源目录内的相对路径")
+    target = (root / rel).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(400, "路径越界：只允许访问资源目录内的文件")
+    return target
+
+
+def _rel_of(root: Path, p: Path) -> str:
+    return p.relative_to(root).as_posix()
+
+
+def _dir_has_child(p: str) -> bool:
+    """这个目录里有没有东西 —— 前端据此决定要不要画展开箭头。"""
+    try:
+        with os.scandir(p) as it:
+            return next(it, None) is not None
+    except OSError:
+        return False
+
+
+@app.post("/api/resourcedir")
+def api_set_resourcedir(payload: dict):
+    """指定 / 更换资源目录（存进当前工作目录的 graph.json）。空串 = 清除。"""
+    raw = ((payload or {}).get("path") or "").strip()
+    with LOCK:
+        d = doc()
+        if not raw:
+            d["resourceDir"] = ""
+            persist()
+            return state_payload()
+        p = Path(raw)
+        if not p.is_dir():
+            raise HTTPException(400, f"目录不存在：{raw}")
+        d["resourceDir"] = str(p.resolve())
+        persist()
+    return state_payload()
+
+
+@app.post("/api/resourcedir/pick")
+def api_pick_resourcedir():
+    """弹原生目录对话框选资源目录（与选工作目录同一套 tkinter）。"""
+    initial = (doc().get("resourceDir") or "").strip() or str(ws().root)
+    try:
+        chosen = _tk_pick_directory(initial)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"无法打开系统对话框（可手动填写路径）：{e}") from e
+    if not chosen:
+        return {"cancelled": True}
+    with LOCK:
+        doc()["resourceDir"] = str(Path(chosen).resolve())
+        persist()
+    return state_payload()
+
+
+@app.get("/api/resourcedir/list")
+def api_list_resourcedir(path: str = ""):
+    """列一个子目录的**直接子项**（懒加载：前端展开某目录时才请求它这一层）。
+
+    目录在前、文件在后，各自按名字排序；图片文件带 `isImage`（只有它是可拖的）。
+    """
+    root = _resource_root()
+    target = _resource_path(path)
+    if not target.is_dir():
+        raise HTTPException(400, "不是一个目录")
+    try:
+        items = list(os.scandir(target))
+    except OSError as e:
+        raise HTTPException(400, f"无法读取目录：{e}") from e
+
+    entries: list[dict] = []
+    for it in items:
+        try:
+            is_dir = it.is_dir()
+        except OSError:
+            continue
+        entry = {
+            "name": it.name,
+            "rel": _rel_of(root, Path(it.path)),
+            "type": "dir" if is_dir else "file",
+        }
+        if is_dir:
+            entry["hasChildren"] = _dir_has_child(it.path)
+        else:
+            ext = Path(it.name).suffix.lower()
+            entry["ext"] = ext
+            entry["isImage"] = ext in IMAGE_EXTS
+            try:
+                st = it.stat()
+                entry["size"] = st.st_size
+                entry["mtime"] = int(st.st_mtime)
+            except OSError:
+                pass
+        entries.append(entry)
+
+    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
+    return {"root": str(root), "path": path, "entries": entries}
+
+
+@app.get("/api/resourcedir/raw")
+def api_resourcedir_raw(path: str = ""):
+    """只读地取资源目录里的一个文件（面板里的缩略图用）。"""
+    p = _resource_path(path)
+    if not p.is_file():
+        raise HTTPException(404, "文件不存在")
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/resources/import-from-resource")
+def api_import_from_resource(payload: dict):
+    """把资源目录里的一个图片文件**复制一份**进当前画布的图片池，成为数据节点。
+
+    与 `/api/resources/import` 的区别只有一个：源文件在本地磁盘上，服务端直接
+    复制 —— 不经浏览器上传，大图不会在前后端之间来回搬。原文件**不动**（资源目录只读）。
+    """
+    body = payload or {}
+    rel = body.get("path", "")
+    src = _resource_path(rel)
+    if not src.is_file():
+        raise HTTPException(404, f"文件不存在：{rel}")
+    ext = src.suffix.lower()
+    if ext not in IMAGE_EXTS:
+        raise HTTPException(400, f"不是图片文件：{src.name}")
+
+    v = view()
+    with LOCK:
+        g = graph()
+        r = {
+            "id": new_id("r"),
+            "name": v.alloc_name(g),
+            "kind": "input",
+            "x": float(body.get("x", 0)),
+            "y": float(body.get("y", 0)),
+        }
+        g["resources"].append(r)
+        dest = v.image_dir(create=True) / f"{r['name']}{ext}"
+        try:
+            shutil.copy2(src, dest)
+        except OSError as e:
+            # 复制失败就把刚加的节点撤掉 —— 别在画布上留一个指向不存在文件的空壳
+            g["resources"].remove(r)
+            raise HTTPException(500, f"复制失败：{e}") from e
+        persist()
+    schedule_purge()
+    return state_payload()
 
 
 # --------------------------------------------------------------------------

@@ -171,6 +171,10 @@ button.primary:hover:not(:disabled) { background: #66aefc; }
 button.tiny { padding: 2px 7px; font-size: 12px; }
 button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
 
+/* ---------------- 主体：左资源面板 + 右画布 ----------------
+   顶栏下面整块区域，横向排开。画布照旧吃掉剩余宽度；资源面板固定宽、可收起。 */
+.app-body { flex: 1 1 auto; display: flex; min-height: 0; }
+
 /* ---------------- 画布 ---------------- */
 .canvas { flex: 1 1 auto; position: relative; min-height: 0; }
 .react-flow__attribution { display: none; }
@@ -889,3 +893,77 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .canvas-pop .ctx-item.on:hover { background: rgba(79, 156, 249, .18); }
 .canvas-pop .ctx-item.danger { color: var(--err); }
 .canvas-pop .ctx-item.danger:hover:not(:disabled) { background: rgba(239, 95, 95, .13); }
+
+/* ---------------- 资源面板（左侧） ----------------
+   显示资源目录的目录结构与文件，图片可拖到画布上建数据节点。
+   资源目录**只读** —— 这里只列目录 / 读图，绝不动里面的文件；
+   拖进画布的是**副本**（复制进当前画布的图片池）。 */
+.res-panel {
+  flex: 0 0 262px; width: 262px;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.res-head {
+  display: flex; align-items: center; gap: 5px; flex: 0 0 auto;
+  padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.res-head .spacer { flex: 1 1 auto; }
+.res-title { flex: 0 0 auto; font-weight: 600; font-size: 12px; }
+/* 路径本身就是按钮：点它手动输入路径（原生对话框打不开时的退路） */
+.res-path {
+  flex: 1 1 auto; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+  font-size: 10.5px; color: var(--muted); font-weight: 400;
+  background: transparent; border-color: transparent; padding: 2px 5px; border-radius: 5px;
+}
+.res-path:hover:not(:disabled) { color: var(--text); background: var(--panel-2); border-color: var(--line); }
+.res-path.empty { opacity: .7; cursor: default; }
+.res-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  height: 22px; min-width: 22px; padding: 0 5px; font-size: 11.5px;
+}
+.res-btn.wide { padding: 0 12px; }
+.res-btn.primary { background: rgba(79, 156, 249, .15); border-color: rgba(79, 156, 249, .4); color: #a5cdfd; }
+.res-btn.primary:hover:not(:disabled) { background: rgba(79, 156, 249, .24); border-color: var(--accent); }
+
+.res-hint { padding: 10px 12px; font-size: 11.5px; color: var(--muted); line-height: 1.7; }
+.res-setup { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.res-input {
+  width: 100%; font: inherit; font-size: 11.5px; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+}
+.res-input:focus { outline: none; border-color: var(--accent); }
+.res-setup-foot { display: flex; gap: 6px; }
+
+.res-tree { flex: 1 1 auto; overflow: auto; padding: 4px 0 10px; }
+.res-msg { font-size: 11px; color: var(--muted); padding: 3px 0; }
+.res-msg.err { color: var(--err); }
+
+.res-row {
+  display: flex; align-items: center; gap: 6px;
+  height: 24px; padding-right: 8px; font-size: 12px; color: var(--text);
+  cursor: default; user-select: none;
+}
+.res-row .res-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-row.dir { cursor: pointer; }
+.res-row.dir:hover, .res-row.file.img:hover { background: var(--panel-2); }
+.res-row.file:not(.img) { color: var(--muted); }
+.res-row.file.img { cursor: grab; }
+.res-row.file.img:active { cursor: grabbing; }
+.res-caret { flex: 0 0 auto; color: var(--muted); transform: rotate(-90deg); transition: transform .12s; }
+.res-caret.open { transform: rotate(0deg); }
+.res-ico { flex: 0 0 auto; }
+.res-ico.dir { color: #d8b35a; }
+.res-ico.file { color: var(--muted); }
+.res-thumb {
+  flex: 0 0 auto; width: 18px; height: 18px;
+  object-fit: contain; border: 1px solid var(--line); border-radius: 3px;
+  /* 透明区域垫棋盘格 —— 抠好的素材一眼能看出哪里透明 */
+  background: repeating-conic-gradient(#3a3f49 0 25%, #2b2f37 0 50%) 0 0 / 8px 8px;
+}
+.res-size { flex: 0 0 auto; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 顶栏那个「资源」开关：开着时给个底色，一眼看出面板处在什么状态 */
+.toolbar .tb-ghost.on { background: var(--panel-2); border-color: var(--line); color: var(--text); }

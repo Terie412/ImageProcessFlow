@@ -14,6 +14,7 @@ import * as api from './api'
 import ResourceNode from './ResourceNode'
 import ProcessNode from './ProcessNode'
 import RegionEditor from './RegionEditor'
+import ResourcePanel, { RESOURCE_DRAG_MIME } from './ResourcePanel'
 import { anchorZoom, enableMiddleDragPan, wheelZoom } from './zoom'
 
 const nodeTypes = { resource: ResourceNode, process: ProcessNode }
@@ -197,6 +198,17 @@ export default function App() {
   const [viewerSize, setViewerSize] = useState(null) // 滚轮缩放后的显式尺寸；null = 交给 CSS
   const [viewerPixel, setViewerPixel] = useState(null) // 光标下那一像素 {x,y,r,g,b,a}；不在图上时 null
   const [editing, setEditing] = useState(null) // 裁剪区域编辑器 { pid, image, regions }
+  // 左侧资源面板是否展开（纯界面偏好，记 localStorage，不进 graph.json）
+  const [resOpen, setResOpen] = useState(() => {
+    try { return localStorage.getItem('ipf.resOpen') !== '0' } catch (e) { return true }
+  })
+  const toggleRes = useCallback(() => {
+    setResOpen((v) => {
+      const nv = !v
+      try { localStorage.setItem('ipf.resOpen', nv ? '1' : '0') } catch (e) { /* 隐私模式下写不了，忽略 */ }
+      return nv
+    })
+  }, [])
 
   const canvasRef = useRef(null)
   const importRef = useRef(null)
@@ -843,6 +855,22 @@ export default function App() {
   const onDrop = useCallback(
     async (e) => {
       e.preventDefault()
+      // ① 从资源面板拖出来的：只带一个相对路径（没有真正的 File），
+      //    服务端直接复制一份进当前画布 —— 大图不经浏览器上传。
+      const rel = e.dataTransfer?.getData(RESOURCE_DRAG_MIME)
+      if (rel) {
+        const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+        setBusy(true)
+        try {
+          applyState(await api.importFromResource(rel, pos.x, pos.y))
+        } catch (err) {
+          flash(err.message)
+        } finally {
+          setBusy(false)
+        }
+        return
+      }
+      // ② 从操作系统拖进来的图片文件：走原来的上传导入
       const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'))
       if (!files.length) return
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
@@ -1275,6 +1303,14 @@ export default function App() {
         {/* ③ 动作：幽灵按钮（无边框，悬停才显形），只强调「导入图片」。
             整组包一层 —— 窗口窄到折行时它们一起挪到第二行，不会被拆成两半。 */}
         <div className="tb-actions">
+          <button
+            className={`tb-ghost${resOpen ? ' on' : ''}`}
+            aria-pressed={resOpen}
+            title={resOpen ? '收起资源面板' : '展开资源面板'}
+            onClick={toggleRes}
+          >
+            资源
+          </button>
           <button className="tb-act" onClick={() => importRef.current?.click()} disabled={!state?.workspace}>
             ＋ 导入图片
           </button>
@@ -1416,13 +1452,22 @@ export default function App() {
         </div>
       </div>
 
-      <div
-        className="canvas"
-        ref={canvasRef}
-        onDrop={onDrop}
-        onDragOver={(e) => e.preventDefault()}
-        onWheel={() => menu && setMenu(null)}
-      >
+      {/* 左：资源面板（可收起）；右：画布。两者独立滚动/缩放 */}
+      <div className="app-body">
+        <ResourcePanel
+          state={state}
+          applyState={applyState}
+          flash={flash}
+          open={resOpen}
+          onToggle={toggleRes}
+        />
+        <div
+          className="canvas"
+          ref={canvasRef}
+          onDrop={onDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onWheel={() => menu && setMenu(null)}
+        >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1564,6 +1609,7 @@ export default function App() {
             </button>
           </div>
         ) : null}
+        </div>
       </div>
 
       {drawer && logOpen ? (
