@@ -1697,15 +1697,15 @@ export default function App() {
                   <span className="viewer-xy">
                     {viewerPixel.x}, {viewerPixel.y}
                   </span>
-                  <span className="viewer-rgb">
-                    R {viewerPixel.r} G {viewerPixel.g} B {viewerPixel.b}
-                    {viewer.alpha ? ` A ${viewerPixel.a}` : ''}
+                  <span className="viewer-color">
+                    {`Color(${viewerPixel.r}, ${viewerPixel.g}, ${viewerPixel.b}${
+                      viewer.alpha ? `, ${viewerPixel.a}` : ''
+                    })`}
                   </span>
                   <span className="viewer-hex">
-                    #{hex2(viewerPixel.r)}
-                    {hex2(viewerPixel.g)}
-                    {hex2(viewerPixel.b)}
-                    {viewer.alpha ? hex2(viewerPixel.a) : ''}
+                    {`#${hex2(viewerPixel.r)}${hex2(viewerPixel.g)}${hex2(viewerPixel.b)}${
+                      viewer.alpha ? hex2(viewerPixel.a) : ''
+                    }`}
                   </span>
                 </>
               ) : (

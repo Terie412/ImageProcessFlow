@@ -729,7 +729,7 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   display: flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--text);
   font-variant-numeric: tabular-nums; white-space: nowrap;
-  min-width: 348px; justify-content: flex-end;
+  min-width: 374px; justify-content: flex-end;
 }
 .viewer-pixel .viewer-idle { color: var(--muted); }
 /* 色块：里面垫一层棋盘格，上面的 rgba 色块按自身 alpha 叠加 —— 半透明的像素
@@ -749,8 +749,8 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .viewer-swatch > i { position: absolute; inset: 0; display: block; }
 .viewer-pixel .viewer-xy { color: var(--muted); min-width: 76px; text-align: right; }
-.viewer-pixel .viewer-rgb { min-width: 172px; text-align: right; }
-.viewer-pixel .viewer-hex { color: var(--muted); min-width: 62px; text-align: right; }
+.viewer-pixel .viewer-color { min-width: 194px; text-align: right; }
+.viewer-pixel .viewer-hex { color: var(--muted); min-width: 66px; text-align: right; }
 .viewer-stage {
   position: absolute; inset: 46px 0 0; overflow: auto;
   cursor: default;                     /* 点哪儿都不再关窗口了，所以不再是 zoom-out */
