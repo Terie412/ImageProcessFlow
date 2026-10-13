@@ -911,14 +911,13 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   position: relative;
 }
 
-/* 右边缘的拖宽手柄：骑在边框上，往里 4px 往外 3px（行的右内边距是 8px，不会盖住文件名） */
+/* 右边缘的拖宽手柄：骑在边框上，往里 4px 往外 3px（行的右内边距是 8px，不会盖住文件名）。
+   **完全不可见** —— 只靠光标提示可拖，不做任何高亮（那会变成一条多余的蓝带）。 */
 .res-resizer {
   position: absolute; top: 0; right: -3px; bottom: 0; width: 7px;
   z-index: 5; cursor: col-resize;
   background: transparent;
-  transition: background .12s;
 }
-.res-resizer:hover, .res-resizer.on { background: rgba(79, 156, 249, .45); }
 /* 拖动过程中整页都是「横向调整」光标，并且不许选中文字 */
 body.col-resizing,
 body.col-resizing * { cursor: col-resize !important; user-select: none !important; }

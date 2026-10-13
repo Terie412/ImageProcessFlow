@@ -136,7 +136,6 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
       return RES_W.def
     }
   })
-  const [dragging, setDragging] = useState(false)
   const widthRef = useRef(width)
   useEffect(() => {
     widthRef.current = width
@@ -157,7 +156,6 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     let latest = widthRef.current
     let x0 = e.clientX
     const w0 = latest
-    setDragging(true)
     document.body.classList.add('col-resizing')
     const move = (ev) => {
       // 上限还要看窗口：别把画布挤得没地方
@@ -166,7 +164,6 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
       setWidth(latest)
     }
     const up = () => {
-      setDragging(false)
       document.body.classList.remove('col-resizing')
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
@@ -511,9 +508,9 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
           )
         : null}
 
-      {/* 右边缘：拖动改宽度，双击恢复默认 */}
+      {/* 右边缘：拖动改宽度（不可见，只靠光标提示），双击恢复默认 */}
       <div
-        className={`res-resizer${dragging ? ' on' : ''}`}
+        className="res-resizer"
         title="拖动调整面板宽度（双击恢复默认）"
         onMouseDown={startResize}
         onDoubleClick={resetWidth}
