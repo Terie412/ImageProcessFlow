@@ -1000,3 +1000,26 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .res-menu { position: fixed; z-index: 60; min-width: 128px; }
 .res-menu .ctx-item.danger { color: var(--err); }
 .res-menu .ctx-item.danger:hover:not(:disabled) { background: rgba(239, 95, 95, .13); }
+
+/* ---------------- 大图查看器：丈量的半透明框 ----------------
+   在图上按住左键拖出来的框，只在拖动期间存在（松手就消失，读数留在顶栏）。
+   它按**百分比**贴在图上，所以缩放 / 滚动时跟着图走 —— 尺寸读的是图内像素，不随缩放变。 */
+.viewer-photo { position: relative; width: max-content; margin: 12px auto; }
+/* img 原来那个 `margin: 12px auto` 挪到了 .viewer-photo 上（否则框会按含外边距的
+   盒子去定位，纵向偏 12px）。这条必须排在 `.viewer-stage img` 之后才生效。 */
+.viewer-photo img { margin: 0; }
+.viewer-mark {
+  position: absolute;
+  pointer-events: none;              /* 必须：否则鼠标移到框上时 img 收不到 mousemove，拖动会卡住 */
+  background: rgba(79, 156, 249, .22);
+  border: 1px solid var(--accent);
+  outline: 1px solid rgba(8, 10, 14, .55);   /* 浅色图上也能看清边界 */
+}
+/* 顶栏里的丈量读数 */
+.viewer-measure {
+  flex: 0 1 auto; display: flex; align-items: baseline; gap: 7px;
+  font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.viewer-measure .viewer-size { font-weight: 500; }
+.viewer-measure .viewer-origin { color: var(--muted); }

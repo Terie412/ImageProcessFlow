@@ -218,7 +218,133 @@ async function main() {
     await sleep(400)
     check('点空白处能关掉', (await viewerState()).open === false)
 
-    console.log('\n[7] 处理节点双击不打开查看器')
+    console.log('\n[7] 丈量：按住左键拖出半透明框，顶栏给图内像素尺寸')
+
+    // 前面那步「点空白处能关掉」当前是失败的（查看器没有点暗处关闭），所以这里
+    // 先自己确保状态：开着就用 Esc 关掉，再从数据节点双击打开 —— 初始必是「适应窗口」
+    if ((await viewerState()).open) {
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await sleep(400)
+    }
+    const thumb = await centerOf(`.react-flow__node[data-id="${rid}"] .thumb`)
+    await dblclick(thumb.x, thumb.y)
+    const v7 = await viewerState()
+    check('重新打开查看器，且是「适应窗口」', v7.open === true && v7.cls.includes('fit'), v7.cls)
+
+    // 图内像素 ←→ 屏幕坐标（当前缩放多少都成立）
+    const imgRect = async () =>
+      J(`(() => {
+        const el = document.querySelector('.viewer-stage img')
+        const r = el.getBoundingClientRect()
+        return JSON.stringify({
+          left: r.left, top: r.top, w: r.width, h: r.height,
+          nw: el.naturalWidth, nh: el.naturalHeight,
+        })
+      })()`)
+    const toScreen = (R, ix, iy) => ({
+      x: Math.round(R.left + (ix / R.nw) * R.w),
+      y: Math.round(R.top + (iy / R.nh) * R.h),
+    })
+    // 反向换算：屏幕坐标 → 图内像素（与被测代码同一套公式，用来算**期望值**）。
+    // 这样断言与当前缩放无关 —— 直接写死 600 的话，缩放到 0.377 时屏幕坐标一取整
+    // 就会差出两三个图内像素，误报。
+    const toImg = (R, p) => ({
+      x: Math.round(Math.max(0, Math.min(R.nw, ((p.x - R.left) / R.w) * R.nw))),
+      y: Math.round(Math.max(0, Math.min(R.nh, ((p.y - R.top) / R.h) * R.nh))),
+    })
+    const readout = async () =>
+      (await evalJs(`(document.querySelector('.viewer-measure')?.textContent || '').trim()`))
+    const markBox = async () =>
+      J(`(() => {
+        const el = document.querySelector('.viewer-mark')
+        if (!el) return 'null'
+        const r = el.getBoundingClientRect()
+        const i = document.querySelector('.viewer-stage img').getBoundingClientRect()
+        return JSON.stringify({
+          dx: Math.round(r.left - i.left), dy: Math.round(r.top - i.top),
+          w: Math.round(r.width), h: Math.round(r.height),
+        })
+      })()`)
+    const drag = async (from, to, mid) => {
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', buttons: 1, clickCount: 1 })
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: to.x, y: to.y, button: 'left', buttons: 1 })
+      await sleep(140)
+      const during = mid ? await mid() : null
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', buttons: 0, clickCount: 1 })
+      await sleep(140)
+      return during
+    }
+    const toggleFit = async () => {
+      const b = await J(`(() => {
+        const el = [...document.querySelectorAll('.viewer-bar button')][0]
+        const r = el.getBoundingClientRect()
+        return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) })
+      })()`)
+      await click(b.x, b.y, 1)
+      await sleep(500)
+    }
+
+    // 两种显示模式各量一遍：**适应窗口是缩放显示的**（最能暴露比例换算错误），实际大小是 1:1
+    let fwdText = ''
+    for (const tag of ['适应窗口', '实际大小']) {
+      if (tag === '实际大小') await toggleFit()
+      const R = await imgRect()
+      const A = toScreen(R, 300, 200)
+      const B = toScreen(R, 900, 800)
+      const ea = toImg(R, A)
+      const eb = toImg(R, B)
+      const exp = {
+        w: Math.abs(eb.x - ea.x),
+        h: Math.abs(eb.y - ea.y),
+        x: Math.min(ea.x, eb.x),
+        y: Math.min(ea.y, eb.y),
+      }
+      const during = await drag(A, B, async () => ({ box: await markBox(), text: await readout() }))
+      const scale = R.w / R.nw
+      check(`[${tag}] 拖动中画出框，读数 = 屏幕坐标换算出的图内像素`,
+        during.box !== null && during.text.includes(`${exp.w} × ${exp.h}`) && during.text.includes(`(${exp.x}, ${exp.y})`),
+        `${during.text}  期望 ${exp.w} × ${exp.h} @ (${exp.x}, ${exp.y})  缩放 ${scale.toFixed(3)}`)
+      check(`[${tag}] 框的渲染尺寸按当前缩放吻合`,
+        Math.abs(during.box.w - exp.w * scale) <= 2 && Math.abs(during.box.h - exp.h * (R.h / R.nh)) <= 2,
+        `${JSON.stringify(during.box)} vs 期望 ${Math.round(exp.w * scale)}`)
+      check(`[${tag}] 松手后框消失、读数与拖动中一致`,
+        (await markBox()) === null && (await readout()) === during.text, await readout())
+      if (tag === '实际大小') {
+        fwdText = during.text
+      }
+    }
+
+    const RF = await imgRect()
+    const A0 = toScreen(RF, 300, 200)
+    const B0 = toScreen(RF, 900, 800)
+
+    // 反向拖（右下 → 左上）：宽高仍是正的，起点仍取左上角 —— 读数应与正向完全一致
+    await drag(B0, A0)
+    check('反向拖的读数与正向一致', (await readout()) === fwdText, await readout())
+
+    // 拖出图片外 → 夹回图内（右下角 = 图片右下角）
+    const outside = { x: RF.left + RF.w + 400, y: RF.top + RF.h + 400 }
+    await drag(A0, outside)
+    const clamped = await readout()
+    const ca = toImg(RF, A0)
+    const expC = { w: RF.nw - ca.x, h: RF.nh - ca.y, x: ca.x, y: ca.y }
+    check('拖出图外会夹回图内（右下角 = 图片右下角）',
+      clamped.includes(`${expC.w} × ${expC.h}`) && clamped.includes(`(${expC.x}, ${expC.y})`),
+      `${clamped}  期望 ${expC.w} × ${expC.h} @ (${expC.x}, ${expC.y})`)
+
+    // 单击（没拖动）不留读数
+    await click(A0.x, A0.y, 1)
+    await sleep(140)
+    check('单击一下把上一次的读数清掉', (await readout()).includes('测量 —'), await readout())
+
+    if ((await viewerState()).open) {
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await sleep(400)
+    }
+
+    console.log('\n[8] 处理节点双击不打开查看器')
     await dblclick((await centerOf(`.react-flow__node[data-id="${pid}"] .node-head`)).x,
                    (await centerOf(`.react-flow__node[data-id="${pid}"] .node-head`)).y)
     check('处理节点双击无反应', (await viewerState()).open === false)
