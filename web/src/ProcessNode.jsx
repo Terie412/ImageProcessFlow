@@ -22,8 +22,29 @@ function regionStyle(r, imgW, imgH) {
   }
 }
 
+/* 分辨率选项的显示：`720x1280` → `720×1280 (9:16)`。
+ *
+ * 比例是**从宽高算出来的**，不写进 manifest —— 派生值不存第二份，将来加一个
+ * `2048x2048` 也不会漏写比例。只认长得像「宽x高」的选项（别的 enum 原样不动），
+ * 而且只改**显示**：`value` 一个字符不动（发 API 走 value，autosize 也只按 value 解析）。
+ * label 里已经有括号的（有人手写过比例）就不再追加。
+ */
+const SIZE_RE = /^(\d+)\s*[xX×*]\s*(\d+)$/
+const gcd = (a, b) => (b ? gcd(b, a % b) : a)
+const withRatio = (o) => {
+  const m = SIZE_RE.exec(String(o.value || '').trim())
+  if (!m || String(o.label || '').includes('(')) return o
+  const w = Number(m[1])
+  const h = Number(m[2])
+  if (!w || !h) return o
+  const g = gcd(w, h)
+  return { ...o, label: `${o.label} (${w / g}:${h / g})` }
+}
+
 const opts = (spec) =>
-  (spec.options || []).map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
+  (spec.options || [])
+    .map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
+    .map(withRatio)
 
 // manifest 里每个参数可以声明 width，决定它在配置区里占多宽（不够就自动折行）
 const WCLASS = { grow: 'grow', narrow: 'narrow', full: 'full' }
