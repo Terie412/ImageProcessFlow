@@ -170,7 +170,15 @@ export default function ProcessNode({ id, data, selected }) {
   }
 
   const openEditor = () => {
-    if (primary && inputRes) onEditRegions(id, { image: { ...inputRes, canvasId }, regions })
+    if (primary && inputRes) {
+      // 标题用参数自己的 label（裁剪节点就是「裁剪区域」，区域抹除是「抹除区域」），
+      // 编辑器本身是通用的，不写死某个节点的名字
+      onEditRegions(id, {
+        image: { ...inputRes, canvasId },
+        regions,
+        title: primary.label || '区域',
+      })
+    }
   }
 
   if (!manifest) return <div className="node">未注册的脚本</div>
@@ -180,6 +188,9 @@ export default function ProcessNode({ id, data, selected }) {
   // 所有输入口都没有可见标签（例如裁剪节点那个无名单口）→ 左栏收窄成一条
   const barePorts =
     portSpecs.length > 0 && portSpecs.every((p) => !p.num && !(p.label || '').trim())
+  // 「自动识别」只有配了 detect 段的节点才有；没配的（如区域抹除）不显示按钮，
+  // 免得点了才弹「这个节点没有配置自动识别」
+  const hasDetect = !!manifest.detect
 
   /* 保持比例（调整分辨率）：开关打开时只有第一个连了图的输入口生效，
      其余已连接的口整行置灰（连线保留、执行时被脚本忽略）。
@@ -302,14 +313,16 @@ export default function ProcessNode({ id, data, selected }) {
                     撤销
                   </button>
                 ) : null}
-                <button
-                  className="mini-btn nodrag"
-                  title="让模型看图挑切分参数，自动算出区域"
-                  disabled={detecting || !inputRes}
-                  onClick={doDetect}
-                >
-                  {detecting ? '识别中…' : '自动识别'}
-                </button>
+                {hasDetect ? (
+                  <button
+                    className="mini-btn nodrag"
+                    title="让模型看图挑切分参数，自动算出区域"
+                    disabled={detecting || !inputRes}
+                    onClick={doDetect}
+                  >
+                    {detecting ? '识别中…' : '自动识别'}
+                  </button>
+                ) : null}
                 <button
                   className="mini-btn nodrag"
                   title="在图上手动增删改区域"

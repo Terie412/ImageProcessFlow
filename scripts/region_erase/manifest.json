@@ -1,0 +1,29 @@
+{
+  "id": "region_erase",
+  "name": "区域抹除",
+  "entry": "region_erase.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "label": "",
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "regions",
+      "type": "regions",
+      "primary": true,
+      "default": [],
+      "label": "抹除区域"
+    }
+  ],
+  "outputs": [{ "key": "image", "type": "image", "multi": false }],
+
+  "_note": "把「抹除区域」里的东西全都抹掉、输出一张图。源图**实际带 Alpha 通道**时抹成透明 (0,0,0,0) 并存 PNG；不带 Alpha 时抹成黑色 (0,0,0) 并跟随原图格式。区域为空则原样复制输入。没有「自动识别」——区域靠预览里手动增删改。",
+  "size": {
+    "defaultWidth": 280,
+    "defaultHeight": 330
+  }
+}

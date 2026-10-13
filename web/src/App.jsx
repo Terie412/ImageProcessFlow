@@ -1675,6 +1675,7 @@ export default function App() {
         <RegionEditor
           image={editing.image}
           regions={editing.regions}
+          title={editing.title}
           onClose={() => setEditing(null)}
           onSave={(next) => {
             onParam(editing.pid, 'regions', next)

@@ -17,7 +17,7 @@ const clampRect = (r, W, H) => {
  * 裁剪区域编辑器：在图上拖拽增删改区域，右边一列数字可以直接精修。
  * 坐标全程用「原图像素」，显示时按渲染比例换算。
  */
-export default function RegionEditor({ image, regions, onSave, onClose }) {
+export default function RegionEditor({ image, regions, onSave, onClose, title = '裁剪区域' }) {
   const imgW = image?.width || 0
   const imgH = image?.height || 0
 
@@ -235,7 +235,7 @@ export default function RegionEditor({ image, regions, onSave, onClose }) {
       <div className="editor" onMouseDown={(e) => e.stopPropagation()}>
         <div className="editor-head">
           <span className="badge">{image?.name}</span>
-          <b>裁剪区域</b>
+          <b>{title}</b>
           <span className="editor-meta">
             {imgW} × {imgH}
           </span>
