@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""验证「资源目录」——工作目录之外的**只读**素材来源。
+"""验证「资源目录」——工作目录之外的素材来源（只读 + 新建目录 / 改名 / 删除）。
 
 纯本地：不起服务、不调用任何模型、不需要 API key。直接驱动 `server/main.py` 里的
 路由函数（它们就是普通函数），断言：
@@ -10,7 +10,11 @@
   ④ raw：能取到文件、取不存在的 404
   ⑤ import-from-resource：复制进当前画布图片池 + 建数据节点 + 原文件不动（只读）
   ⑥ 非图片不给导
-  ⑦ 空串 = 清除资源目录
+  ⑦ 写操作：新建目录 / 重命名 / 删除（含名字校验、越界、根目录不给动）
+  ⑧ 空串 = 清除资源目录
+
+> 「删除」在测试里把系统回收站换成了假实现（直接删），免得跑一次测试就往真回收站里
+> 丢东西；真机上的回收站那条路见下面注释。
 
     runtime\\venv\\Scripts\\python.exe runtime\\verify_resourcedir.py
 """
@@ -70,6 +74,16 @@ def setup() -> None:
     m.STATE["graph"] = None
     m.STATE["registry"] = {}
     m.STATE["settings"] = json.loads(json.dumps(m.DEFAULT_SETTINGS))
+
+    # 删除测试别真往系统回收站里丢东西 —— 把「进回收站」换成直接删（其余逻辑照跑）
+    def fake_trash(p):
+        if Path(p).is_dir():
+            drop_tree(p)
+        else:
+            Path(p).unlink()
+        return True
+
+    m._win_send_to_trash = fake_trash
 
 
 def run() -> None:
@@ -148,7 +162,51 @@ def run() -> None:
     check("越界路径被拒", expect_http(m.api_import_from_resource, {"path": "../README.md"}) == 400)
 
     print("=" * 66)
-    print("[7] 空串 = 清除资源目录")
+    print("[7] 写操作：新建目录 / 重命名 / 删除（面板右键那三样）")
+    print("=" * 66)
+    # --- 新建目录 ---
+    r = m.api_resourcedir_mkdir({"parent": "", "name": "newdir"})
+    check("根下新建目录，这一层列表里有它", any(e["name"] == "newdir" and e["type"] == "dir" for e in r["entries"]))
+    check("磁盘上真建出来了", (SRC / "newdir").is_dir())
+    check("返回的就是这一层（path=''）", r.get("path") == "")
+    check("重名 → 400", expect_http(m.api_resourcedir_mkdir, {"parent": "", "name": "newdir"}) == 400)
+    r = m.api_resourcedir_mkdir({"parent": "sub", "name": "inner"})
+    check("在子目录里新建 → 返回 sub 这层", r.get("path") == "sub" and any(e["name"] == "inner" for e in r["entries"]))
+    check("嵌套目录建出来了", (SRC / "sub" / "inner").is_dir())
+    check("parent 是文件 → 400", expect_http(m.api_resourcedir_mkdir, {"parent": "a.png", "name": "x"}) == 400)
+    check("parent 越界 → 400", expect_http(m.api_resourcedir_mkdir, {"parent": "../x", "name": "y"}) == 400)
+
+    # --- 名字校验（新建与重命名共用同一个 _safe_child_name）---
+    for bad in ["", "   ", ".", "..", "a/b", "a\\b", "a:b", "a.", "CON", "nul.txt", "x" * 201]:
+        check(f"非法名字被拒：{bad[:10]!r}", expect_http(m._safe_child_name, bad) == 400)
+    check("正常名字（含中文、首尾空格）通过", m._safe_child_name(" 我的图集 ") == "我的图集")
+
+    # --- 重命名 ---
+    r = m.api_resourcedir_rename({"path": "b.txt", "name": "c.txt"})
+    check("文件改名成功", (SRC / "c.txt").is_file() and not (SRC / "b.txt").exists())
+    check("返回父目录（根）这层", r.get("path") == "" and any(e["name"] == "c.txt" for e in r["entries"]))
+    m.api_resourcedir_rename({"path": "newdir", "name": "renamed"})
+    check("目录改名成功", (SRC / "renamed").is_dir() and not (SRC / "newdir").exists())
+    check("改成已存在的名字 → 400", expect_http(m.api_resourcedir_rename, {"path": "a.png", "name": "c.txt"}) == 400)
+    check("重命名资源目录根 → 400", expect_http(m.api_resourcedir_rename, {"path": "", "name": "x"}) == 400)
+    check("重命名不存在的 → 404", expect_http(m.api_resourcedir_rename, {"path": "nope.txt", "name": "x"}) == 404)
+    check("改成同名 = 原地不动，仍成功", m.api_resourcedir_rename({"path": "a.png", "name": "a.png"}).get("ok") is True)
+    check("_parent_rel 取父目录", m._parent_rel("sub/c.jpg") == "sub" and m._parent_rel("a.png") == "")
+
+    # --- 删除（测试里回收站是假的；真机上会进系统回收站）---
+    (SRC / "sub" / "inner" / "deep.txt").write_text("x", encoding="utf-8")
+    r = m.api_resourcedir_delete({"path": "sub"})
+    check("删目录：连同里面的内容一起没了", not (SRC / "sub").exists())
+    check("报告「进了回收站」", r.get("toTrash") is True)
+    r = m.api_resourcedir_delete({"path": "c.txt"})
+    check("删文件：从磁盘消失", not (SRC / "c.txt").exists())
+    check("删完回的是父目录这层", all(e["name"] != "c.txt" for e in r["entries"]))
+    check("删资源目录根 → 400", expect_http(m.api_resourcedir_delete, {"path": ""}) == 400)
+    check("删越界路径 → 400", expect_http(m.api_resourcedir_delete, {"path": "../README.md"}) == 400)
+    check("删不存在的 → 404", expect_http(m.api_resourcedir_delete, {"path": "nope"}) == 404)
+
+    print("=" * 66)
+    print("[8] 空串 = 清除资源目录")
     print("=" * 66)
     sp = m.api_set_resourcedir({"path": ""})
     check("清除后 state 为空串", sp.get("resourceDir") == "")

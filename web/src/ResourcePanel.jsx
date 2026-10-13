@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import * as api from './api'
 
 /* 拖拽资源文件用的自定义 MIME。
@@ -36,7 +37,7 @@ const FileIco = () => (
 )
 
 /* 一层目录的行。递归渲染展开的子目录 —— 数据都在父组件的 tree / expanded 里。 */
-function Rows({ rel, depth, tree, expanded, onToggle, onDragStart }) {
+function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu }) {
   const node = tree[rel]
   if (!node) return null
   const pad = { paddingLeft: 8 + depth * 13 }
@@ -52,7 +53,13 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart }) {
       {node.entries.map((e) => (
         <React.Fragment key={e.rel}>
           {e.type === 'dir' ? (
-            <div className="res-row dir" style={pad} title={e.name} onClick={() => onToggle(e.rel)}>
+            <div
+              className="res-row dir"
+              style={pad}
+              title={e.name}
+              onClick={() => onToggle(e.rel)}
+              onContextMenu={(ev) => onMenu(ev, { type: 'dir', rel: e.rel, name: e.name })}
+            >
               <Chevron open={expanded.has(e.rel)} />
               <FolderIco />
               <span className="res-name">{e.name}</span>
@@ -64,6 +71,7 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart }) {
               title={e.isImage ? `${e.name}\n拖到画布即可新建数据节点` : `${e.name}\n（不是图片，不能拖）`}
               draggable={!!e.isImage}
               onDragStart={e.isImage ? (ev) => onDragStart(ev, e) : undefined}
+              onContextMenu={(ev) => onMenu(ev, { type: 'file', rel: e.rel, name: e.name })}
             >
               {e.isImage ? (
                 <img className="res-thumb" src={api.resourceRawUrl(e.rel, e.mtime)} alt="" loading="lazy" draggable={false} />
@@ -75,7 +83,15 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart }) {
             </div>
           )}
           {e.type === 'dir' && expanded.has(e.rel) ? (
-            <Rows rel={e.rel} depth={depth + 1} tree={tree} expanded={expanded} onToggle={onToggle} onDragStart={onDragStart} />
+            <Rows
+              rel={e.rel}
+              depth={depth + 1}
+              tree={tree}
+              expanded={expanded}
+              onToggle={onToggle}
+              onDragStart={onDragStart}
+              onMenu={onMenu}
+            />
           ) : null}
         </React.Fragment>
       ))}
@@ -84,11 +100,14 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart }) {
 }
 
 /*
- * 资源面板：显示「资源目录」的目录结构与文件，可以把其中的图片**拖到画布**上
- * 自动建一个数据节点（拖 = 复制一份进当前画布的图片池，原文件不动）。
+ * 资源面板：显示「资源目录」的目录结构与文件。
  *
- * 读取是**懒加载**的：进入只读根目录一层，展开某个子目录时才请求它那一层 ——
- * 资源目录可能很大，一次性递归会又慢又占内存。
+ * - 读取是**懒加载**的：进入只读根目录一层，展开某个子目录时才请求它那一层。
+ * - 图片可以**拖到画布**上自动建数据节点（拖 = 复制一份进当前画布的图片池）。
+ * - 右键：空白处 / 目录 → 新建目录；目录与文件 → 重命名、删除。
+ *
+ * 资源目录现在**可写**了（新建目录 / 改名 / 删除），但仍然只动它自己里面的东西，
+ * 而且**不创建文件**、**删除走回收站**（见 DESIGN.md §3.15）。
  */
 export default function ResourcePanel({ state, applyState, flash, open, onToggle }) {
   const dir = state?.resourceDir || ''
@@ -98,6 +117,11 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   const [expanded, setExpanded] = useState(() => new Set())
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+
+  const [menu, setMenu] = useState(null)   // { x, y, target:{type,rel,name} }
+  const [dlg, setDlg] = useState(null)     // { kind:'mkdir'|'rename'|'delete', … }
+  const [dlgErr, setDlgErr] = useState('')
+  const [busyAct, setBusyAct] = useState(false)
 
   const load = useCallback(async (rel) => {
     setTree((t) => ({ ...t, [rel]: { status: 'loading', entries: [], error: '' } }))
@@ -114,8 +138,23 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     setTree({})
     setExpanded(new Set())
     setEditing(false)
+    setMenu(null)
+    setDlg(null)
     if (dir) load('')
   }, [dir, state?.workspace, load])
+
+  // 菜单开着时：点别处 / 按 Esc 就关掉
+  useEffect(() => {
+    if (!menu) return undefined
+    const close = () => setMenu(null)
+    const onKey = (e) => e.key === 'Escape' && setMenu(null)
+    document.addEventListener('mousedown', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
 
   const refresh = () => {
     setTree({})
@@ -158,6 +197,71 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     }
   }
 
+  /* ---------------- 右键菜单 ---------------- */
+  // 菜单挂到 body 上（Portal）、用**视口坐标**定位 —— 免得被面板或画布的定位上下文困住
+  const openMenu = (ev, target) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    setMenu({
+      x: Math.max(4, Math.min(ev.clientX, window.innerWidth - 150)),
+      y: Math.min(ev.clientY, window.innerHeight - 8),
+      target,
+    })
+  }
+
+  /* ---------------- 写操作 ---------------- */
+  // 写完统一回「这一层的新列表」，就地把树里那格换掉，并把它展开（好让新项看得见）
+  const applyListing = (res) => {
+    const rel = res?.path ?? ''
+    setTree((t) => ({ ...t, [rel]: { status: 'done', entries: res.entries || [], error: '' } }))
+    setExpanded((prev) => new Set(prev).add(rel))
+  }
+
+  // 目录被改名 / 删掉后，它下面那些缓存（tree 与展开态）全失效 —— 整枝摘掉，下次展开再读
+  const purgeBelow = (rel) => {
+    const prefix = `${rel}/`
+    setTree((t) => {
+      const n = { ...t }
+      for (const k of Object.keys(n)) {
+        if (k === rel || k.startsWith(prefix)) delete n[k]
+      }
+      return n
+    })
+    setExpanded((prev) => {
+      const n = new Set()
+      for (const k of prev) {
+        if (k !== rel && !k.startsWith(prefix)) n.add(k)
+      }
+      return n
+    })
+  }
+
+  const submitDlg = async () => {
+    if (!dlg || busyAct) return
+    setBusyAct(true)
+    setDlgErr('')
+    try {
+      if (dlg.kind === 'mkdir') {
+        applyListing(await api.mkdirResource(dlg.parent, draft))
+        flash(`已新建目录 ${draft.trim()}`)
+      } else if (dlg.kind === 'rename') {
+        applyListing(await api.renameResource(dlg.path, draft))
+        purgeBelow(dlg.path)
+        flash(`已重命名为 ${draft.trim()}`)
+      } else {
+        const res = await api.deleteResource(dlg.path)
+        if (dlg.isDir) purgeBelow(dlg.path)
+        applyListing(res)
+        flash(res.toTrash ? `已移入回收站：${dlg.name}` : `已永久删除：${dlg.name}`)
+      }
+      setDlg(null)
+    } catch (e) {
+      setDlgErr(e.message)
+    } finally {
+      setBusyAct(false)
+    }
+  }
+
   if (!open) return null
 
   return (
@@ -167,7 +271,7 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
         {dir ? (
           <button
             className="res-path"
-            title={`${dir}\n资源目录只读，拖进画布的是副本\n点击可手动输入路径`}
+            title={`${dir}\n可在这里新建目录 / 改名 / 删除（删除进回收站）\n点击可手动输入路径`}
             onClick={() => {
               setDraft(dir)
               setEditing(true)
@@ -227,10 +331,127 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
           </div>
         </div>
       ) : (
-        <div className="res-tree">
-          <Rows rel="" depth={0} tree={tree} expanded={expanded} onToggle={toggleDir} onDragStart={onDragStart} />
+        /* 空白处右键 = 在资源目录根下新建目录；行上的右键会被行自己接走，冒泡不到这里 */
+        <div className="res-tree" onContextMenu={(ev) => openMenu(ev, { type: 'blank' })}>
+          <Rows
+            rel=""
+            depth={0}
+            tree={tree}
+            expanded={expanded}
+            onToggle={toggleDir}
+            onDragStart={onDragStart}
+            onMenu={openMenu}
+          />
         </div>
       )}
+
+      {menu
+        ? createPortal(
+            <div
+              className="ctx-menu res-menu"
+              style={{ left: menu.x, top: menu.y }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="ctx-title">{menu.target.type === 'blank' ? '资源目录根' : menu.target.name}</div>
+              {menu.target.type !== 'file' ? (
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    const parent = menu.target.type === 'dir' ? menu.target.rel : ''
+                    setMenu(null)
+                    setDlgErr('')
+                    setDraft('')
+                    setDlg({ kind: 'mkdir', parent })
+                  }}
+                >
+                  新建目录
+                </button>
+              ) : null}
+              {menu.target.type !== 'blank' ? (
+                <>
+                  <div className="ctx-sep" />
+                  <button
+                    className="ctx-item"
+                    onClick={() => {
+                      const t = menu.target
+                      setMenu(null)
+                      setDlgErr('')
+                      setDraft(t.name)
+                      setDlg({ kind: 'rename', path: t.rel, name: t.name })
+                    }}
+                  >
+                    重命名
+                  </button>
+                  <button
+                    className="ctx-item danger"
+                    onClick={() => {
+                      const t = menu.target
+                      setMenu(null)
+                      setDlgErr('')
+                      setDlg({ kind: 'delete', path: t.rel, name: t.name, isDir: t.type === 'dir' })
+                    }}
+                  >
+                    删除
+                  </button>
+                </>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {dlg
+        ? createPortal(
+            <div className="modal-mask" onMouseDown={() => !busyAct && setDlg(null)}>
+              <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+                {dlg.kind === 'delete' ? (
+                  <>
+                    <h3>删除{dlg.isDir ? '目录' : '文件'}</h3>
+                    <p>
+                      将删除 <b>{dlg.name}</b>
+                      {dlg.isDir ? '（连同它里面的所有内容）' : ''}。
+                      <br />
+                      会移入<b>回收站</b>，之后还能找回来。
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h3>{dlg.kind === 'mkdir' ? '新建目录' : '重命名'}</h3>
+                    <p>
+                      {dlg.kind === 'mkdir'
+                        ? `在「${dlg.parent || '资源目录根'}」下新建一个目录。`
+                        : '只能改名，不会移到别的目录。'}
+                    </p>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={draft}
+                      placeholder="名字"
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitDlg()
+                        if (e.key === 'Escape') setDlg(null)
+                      }}
+                    />
+                  </>
+                )}
+                {dlgErr ? <div className="err">{dlgErr}</div> : null}
+                <div className="modal-foot">
+                  <button onClick={() => setDlg(null)} disabled={busyAct}>取消</button>
+                  <button
+                    className={dlg.kind === 'delete' ? 'danger' : 'primary'}
+                    disabled={busyAct || (dlg.kind !== 'delete' && !draft.trim())}
+                    onClick={submitDlg}
+                  >
+                    {busyAct ? '处理中…' : dlg.kind === 'delete' ? '删除' : '确定'}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </aside>
   )
 }

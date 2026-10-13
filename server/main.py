@@ -1027,6 +1027,51 @@ def _dir_has_child(p: str) -> bool:
         return False
 
 
+def _list_dir(rel: str) -> dict:
+    """列一个目录的**直接子项**（懒加载一层）。
+
+    目录在前、文件在后，各按名字排序；图片文件带 `isImage`（只有它能拖进画布）。
+    `list` / `mkdir` / `rename` / `delete` 都回这一份 —— 写完之后前端就地把这一层刷新掉，
+    不用再单独拉一次列表。
+    """
+    root = _resource_root()
+    target = _resource_path(rel)
+    if not target.is_dir():
+        raise HTTPException(400, "不是一个目录")
+    try:
+        items = list(os.scandir(target))
+    except OSError as e:
+        raise HTTPException(400, f"无法读取目录：{e}") from e
+
+    entries: list[dict] = []
+    for it in items:
+        try:
+            is_dir = it.is_dir()
+        except OSError:
+            continue
+        entry = {
+            "name": it.name,
+            "rel": _rel_of(root, Path(it.path)),
+            "type": "dir" if is_dir else "file",
+        }
+        if is_dir:
+            entry["hasChildren"] = _dir_has_child(it.path)
+        else:
+            ext = Path(it.name).suffix.lower()
+            entry["ext"] = ext
+            entry["isImage"] = ext in IMAGE_EXTS
+            try:
+                st = it.stat()
+                entry["size"] = st.st_size
+                entry["mtime"] = int(st.st_mtime)
+            except OSError:
+                pass
+        entries.append(entry)
+
+    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
+    return {"root": str(root), "path": (rel or "").strip("/"), "entries": entries}
+
+
 @app.post("/api/resourcedir")
 def api_set_resourcedir(payload: dict):
     """指定 / 更换资源目录（存进当前工作目录的 graph.json）。空串 = 清除。"""
@@ -1063,46 +1108,167 @@ def api_pick_resourcedir():
 
 @app.get("/api/resourcedir/list")
 def api_list_resourcedir(path: str = ""):
-    """列一个子目录的**直接子项**（懒加载：前端展开某目录时才请求它这一层）。
+    """列一个子目录的**直接子项**（懒加载：前端展开某目录时才请求它这一层）。"""
+    return _list_dir(path)
 
-    目录在前、文件在后，各自按名字排序；图片文件带 `isImage`（只有它是可拖的）。
+
+# --------------------------------------------------------------------------
+# 资源目录：写操作（新建目录 / 重命名 / 删除）
+#
+# 这**打破**了资源目录原本「只读」的约定（见 DESIGN.md §3.15）：现在可以在里面
+# 新建目录、重命名、删除。三条纪律没变：
+#   · 只动资源目录**内**的东西 —— 一切路径仍走 `_resource_path()` 那道防线；
+#   · **不创建文件**，只能新建目录（文件从哪来是用户自己的事）；
+#   · 删除走**回收站**，不永久删除 —— 资源目录往往就是用户自己的「下载」「图片」，
+#     删错了必须能找回来。
+# --------------------------------------------------------------------------
+_WIN_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def _parent_rel(rel: str) -> str:
+    """取一个相对路径的父目录（同样用正斜杠、相对资源目录根）。"""
+    r = (rel or "").strip("/")
+    return r.rsplit("/", 1)[0] if "/" in r else ""
+
+
+def _safe_child_name(name: str) -> str:
+    """校验「新建 / 重命名」里的**单段名字**。不合规直接 400。"""
+    n = (name or "").strip()
+    if not n:
+        raise HTTPException(400, "名字不能为空")
+    if n in (".", ".."):
+        raise HTTPException(400, "名字不合法")
+    if any(c in n for c in "/\\") or any(ord(c) < 32 for c in n):
+        raise HTTPException(400, "名字里不能有路径分隔符或控制字符")
+    if any(c in n for c in '<>:"|?*'):
+        raise HTTPException(400, '名字里不能有这些字符：< > : " | ? *')
+    if n[-1] in (".", " "):
+        raise HTTPException(400, "名字不能以点或空格结尾")
+    if n.split(".")[0].upper() in _WIN_RESERVED:
+        raise HTTPException(400, f"{n} 是 Windows 保留名，换一个")
+    if len(n) > 200:
+        raise HTTPException(400, "名字太长了（超过 200 个字符）")
+    return n
+
+
+def _win_send_to_trash(path: Path) -> bool:
+    """Windows：把一项丢进**回收站**（SHFileOperationW + FOF_ALLOWUNDO，静默）。"""
+    import ctypes
+    from ctypes import wintypes
+
+    FO_DELETE = 3
+    FOF_SILENT = 0x0004
+    FOF_NOCONFIRMATION = 0x0010
+    FOF_ALLOWUNDO = 0x0040          # 有它才进回收站；没有就是永久删除
+    FOF_NOERRORUI = 0x0400
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_uint16),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    # pFrom 是**双 null 结尾**的多字符串（这里只有一项）
+    op = SHFILEOPSTRUCTW(
+        None, FO_DELETE, str(path) + "\0\0", None,
+        FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI,
+        False, None, None,
+    )
+    rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    return rc == 0 and not op.fAnyOperationsAborted
+
+
+def _delete_resource_item(p: Path) -> bool:
+    """删掉资源目录里的一项，返回「是否进了回收站」。
+
+    Windows 上回收站那条路走不通就**报错，绝不退化成永久删除** —— 这是用户自己的
+    文件，不能因为一个 Shell 调用失败就悄悄销毁。
     """
-    root = _resource_root()
-    target = _resource_path(path)
-    if not target.is_dir():
-        raise HTTPException(400, "不是一个目录")
+    if os.name == "nt":
+        if _win_send_to_trash(p):
+            return True
+        raise HTTPException(500, f"没能移入回收站，未删除任何东西：{p.name}")
     try:
-        items = list(os.scandir(target))
+        from send2trash import send2trash  # type: ignore
+
+        send2trash(str(p))
+        return True
+    except Exception:  # noqa: BLE001  没装就退化成永久删除（返回 False 让界面说清楚）
+        pass
+    if p.is_dir():
+        drop_tree(p)
+    else:
+        p.unlink()
+    return False
+
+
+@app.post("/api/resourcedir/mkdir")
+def api_resourcedir_mkdir(payload: dict):
+    """在 `parent` 指定的目录里新建一个子目录，回**这一层**的新列表。
+
+    `parent` 是相对资源目录根的路径，空串 = 资源目录根（面板空白处右键就是它）。
+    """
+    body = payload or {}
+    parent_rel = (body.get("parent") or "").strip("/")
+    name = _safe_child_name(body.get("name", ""))
+    parent = _resource_path(parent_rel)
+    if not parent.is_dir():
+        raise HTTPException(400, "目标不是一个目录")
+    target = parent / name
+    if target.exists():
+        raise HTTPException(400, f"已经存在同名项：{name}")
+    try:
+        target.mkdir()
     except OSError as e:
-        raise HTTPException(400, f"无法读取目录：{e}") from e
+        raise HTTPException(500, f"新建目录失败：{e}") from e
+    return {"ok": True, **_list_dir(parent_rel)}
 
-    entries: list[dict] = []
-    for it in items:
-        try:
-            is_dir = it.is_dir()
-        except OSError:
-            continue
-        entry = {
-            "name": it.name,
-            "rel": _rel_of(root, Path(it.path)),
-            "type": "dir" if is_dir else "file",
-        }
-        if is_dir:
-            entry["hasChildren"] = _dir_has_child(it.path)
-        else:
-            ext = Path(it.name).suffix.lower()
-            entry["ext"] = ext
-            entry["isImage"] = ext in IMAGE_EXTS
-            try:
-                st = it.stat()
-                entry["size"] = st.st_size
-                entry["mtime"] = int(st.st_mtime)
-            except OSError:
-                pass
-        entries.append(entry)
 
-    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
-    return {"root": str(root), "path": path, "entries": entries}
+@app.post("/api/resourcedir/rename")
+def api_resourcedir_rename(payload: dict):
+    """把资源目录里的一项（文件或目录）**改名** —— 不移动，只在同一个父目录内。"""
+    body = payload or {}
+    rel = (body.get("path") or "").strip("/")
+    if not rel:
+        raise HTTPException(400, "不能重命名资源目录本身")
+    name = _safe_child_name(body.get("name", ""))
+    src = _resource_path(rel)
+    if not src.exists():
+        raise HTTPException(404, "目标不存在")
+    if name == src.name:
+        # 改成同名 = 什么都没做，直接回这一层（也躲开 Windows 上同名 rename 的边界行为）
+        return {"ok": True, **_list_dir(_parent_rel(rel))}
+    dst = src.parent / name
+    if dst.exists():
+        raise HTTPException(400, f"已经存在同名项：{name}")
+    try:
+        src.rename(dst)
+    except OSError as e:
+        raise HTTPException(500, f"重命名失败：{e}") from e
+    return {"ok": True, **_list_dir(_parent_rel(rel))}
+
+
+@app.post("/api/resourcedir/delete")
+def api_resourcedir_delete(payload: dict):
+    """删除资源目录里的一项（**目录会连同里面的内容一起**），默认进回收站。"""
+    rel = ((payload or {}).get("path") or "").strip("/")
+    if not rel:
+        raise HTTPException(400, "不能删除资源目录本身")
+    target = _resource_path(rel)
+    if not target.exists():
+        raise HTTPException(404, "目标不存在")
+    to_trash = _delete_resource_item(target)
+    return {"ok": True, "toTrash": to_trash, **_list_dir(_parent_rel(rel))}
 
 
 @app.get("/api/resourcedir/raw")

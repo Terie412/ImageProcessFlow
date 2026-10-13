@@ -85,6 +85,10 @@ export const listResourceDir = (path) =>
 // 从资源目录里取一个文件拖进画布 = 服务端直接**复制**一份进当前画布（不上传）
 export const importFromResource = (path, x, y) =>
   post('/api/resources/import-from-resource', { path, x, y })
+// 资源目录的右键写操作：只新建**目录**（不建文件）、改名、删除；删除默认进回收站
+export const mkdirResource = (parent, name) => post('/api/resourcedir/mkdir', { parent, name })
+export const renameResource = (path, name) => post('/api/resourcedir/rename', { path, name })
+export const deleteResource = (path) => post('/api/resourcedir/delete', { path })
 // 面板里的缩略图：只读地取资源目录里的原文件，交给浏览器缩放
 export const resourceRawUrl = (path, mtime) =>
   `/api/resourcedir/raw?path=${encodeURIComponent(path || '')}&v=${mtime || 0}`

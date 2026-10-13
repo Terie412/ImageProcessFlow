@@ -967,3 +967,10 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 
 /* 顶栏那个「资源」开关：开着时给个底色，一眼看出面板处在什么状态 */
 .toolbar .tb-ghost.on { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+
+/* 资源面板的右键菜单：挂在 body 上、用视口坐标（position: fixed），
+   所以压在画布之上（画布里的 React Flow 有自己的层级），也不会被面板困住。
+   删除项要红 —— .ctx-item.danger 的样式只写在 .canvas-pop 下面，这儿得补一条 */
+.res-menu { position: fixed; z-index: 60; min-width: 128px; }
+.res-menu .ctx-item.danger { color: var(--err); }
+.res-menu .ctx-item.danger:hover:not(:disabled) { background: rgba(239, 95, 95, .13); }
