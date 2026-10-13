@@ -640,6 +640,15 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .ebox-h.ne { right: -6px; top: -6px; cursor: nesw-resize; }
 .ebox-h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
 .ebox-h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+/* 四个角压住四条边（DOM 里角在后面，这里再抬一层）：鼠标落在角上时不给边抢走 */
+.ebox-h.nw, .ebox-h.ne, .ebox-h.sw, .ebox-h.se { z-index: 2; }
+/* 四条边：整条贯穿，只改一条边 */
+.ebox-h.n, .ebox-h.s { left: 0; right: 0; width: auto; cursor: ns-resize; }
+.ebox-h.n { top: -6px; }
+.ebox-h.s { bottom: -6px; }
+.ebox-h.w, .ebox-h.e { top: 0; bottom: 0; height: auto; cursor: ew-resize; }
+.ebox-h.w { left: -6px; }
+.ebox-h.e { right: -6px; }
 .ebox-h.hot {
   background: rgba(79, 156, 249, .22);
   box-shadow: inset 0 0 0 1.5px var(--accent);

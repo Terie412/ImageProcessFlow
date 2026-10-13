@@ -118,10 +118,11 @@ export default function RegionEditor({ image, regions, onSave, onClose }) {
         let y0 = o.y
         let x1 = o.x + o.w
         let y1 = o.y + o.h
-        if (d.handle[0] === 'n') y0 = p.y
-        if (d.handle[0] === 's') y1 = p.y
-        if (d.handle[1] === 'w') x0 = p.x
-        if (d.handle[1] === 'e') x1 = p.x
+        // 把手串里带哪个字母就动哪条边：nw/ne/sw/se 是角，n/s/w/e 是单边
+        if (d.handle.includes('n')) y0 = p.y
+        else if (d.handle.includes('s')) y1 = p.y
+        if (d.handle.includes('w')) x0 = p.x
+        else if (d.handle.includes('e')) x1 = p.x
         x = Math.min(x0, x1)
         y = Math.min(y0, y1)
         w = Math.abs(x1 - x0)
@@ -249,7 +250,7 @@ export default function RegionEditor({ image, regions, onSave, onClose }) {
           ) : null}
           <span className="spacer" />
           <span className="editor-hint">
-            空白处拖出新框 · 框内拖动 · 拖四角改大小 · 滚轮缩放 · 中键平移 · Delete 删除
+            空白处拖出新框 · 框内拖动 · 拖四角或四边改大小 · 滚轮缩放 · 中键平移 · Delete 删除
           </span>
         </div>
 
@@ -274,7 +275,8 @@ export default function RegionEditor({ image, regions, onSave, onClose }) {
                         onMouseDown={(e) => startDrag(e, 'move', i)}
                       >
                         <span className="ebox-tag">{i + 1}</span>
-                        {['nw', 'ne', 'sw', 'se'].map((h) => (
+                        {/* 四条边：整条可拖，改单边；四个角：改两边。角排在后面 + z-index 压住边 */}
+                        {['n', 's', 'w', 'e', 'nw', 'ne', 'sw', 'se'].map((h) => (
                           <i
                             key={h}
                             className={`ebox-h ${h}${hover === h ? ' hot' : ''}`}
