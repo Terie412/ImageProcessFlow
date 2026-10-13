@@ -92,6 +92,9 @@ export const deleteResource = (path) => post('/api/resourcedir/delete', { path }
 // 面板里的缩略图：只读地取资源目录里的原文件，交给浏览器缩放
 export const resourceRawUrl = (path, mtime) =>
   `/api/resourcedir/raw?path=${encodeURIComponent(path || '')}&v=${mtime || 0}`
+// 双击预览时读一张图的尺寸 / 格式 / 有没有 alpha（与数据节点同一口径，只读文件头）
+export const resourceInfo = (path) =>
+  fetch(`/api/resourcedir/info?path=${encodeURIComponent(path || '')}`).then(J)
 
 /* 图片池是按画布分的，所以取图**必须带画布 id** ——
    两个画布各有一个 A 是完全正常的，少了 id 会把别的画布的 A 拿过来 */

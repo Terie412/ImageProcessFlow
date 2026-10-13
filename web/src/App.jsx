@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   Controls,
@@ -15,7 +15,7 @@ import ResourceNode from './ResourceNode'
 import ProcessNode from './ProcessNode'
 import RegionEditor from './RegionEditor'
 import ResourcePanel, { RESOURCE_DRAG_MIME } from './ResourcePanel'
-import { anchorZoom, enableMiddleDragPan, wheelZoom } from './zoom'
+import ImageViewer from './ImageViewer'
 
 const nodeTypes = { resource: ResourceNode, process: ProcessNode }
 
@@ -54,9 +54,6 @@ const clampGrid = (v) => {
   if (!Number.isFinite(n) || n <= 0) return null
   return Math.max(GRID_RANGE[0], Math.min(GRID_RANGE[1], Math.round(n)))
 }
-
-// 查看器像素读数用：0~255 → 两位十六进制
-const hex2 = (v) => v.toString(16).padStart(2, '0')
 
 /*
  * 尺寸规格按「具体节点类型」索引，与服务端的 `settings.nodeSize` / `settings.nodeMin`
@@ -193,10 +190,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [canvasPop, setCanvasPop] = useState(null) // 画布控件里开着的弹层：null | 'list' | 'more'
   const [selIds, setSelIds] = useState([]) // 当前选中的节点 id（用于左上角显示尺寸）
-  const [viewer, setViewer] = useState(null) // 双击数据节点打开的大图查看器
-  const [viewerFit, setViewerFit] = useState(true) // 查看器：适应窗口 / 实际像素
-  const [viewerSize, setViewerSize] = useState(null) // 滚轮缩放后的显式尺寸；null = 交给 CSS
-  const [viewerPixel, setViewerPixel] = useState(null) // 光标下那一像素 {x,y,r,g,b,a}；不在图上时 null
+  const [viewer, setViewer] = useState(null) // 双击数据节点打开的大图查看器（见 ImageViewer.jsx）
   const [editing, setEditing] = useState(null) // 裁剪区域编辑器 { pid, image, regions }
   // 左侧资源面板是否展开（纯界面偏好，记 localStorage，不进 graph.json）
   const [resOpen, setResOpen] = useState(() => {
@@ -212,12 +206,6 @@ export default function App() {
 
   const canvasRef = useRef(null)
   const importRef = useRef(null)
-  const viewerStageRef = useRef(null)
-  const viewerImgRef = useRef(null)
-  const viewerAnchorRef = useRef(null)
-  // 把查看器里的图原样画进一块离屏 canvas，鼠标移动时按图内坐标取那一个像素。
-  // 只读同一张图的一次绘制结果，缩放/平移都不用重画（图内容没变）。
-  const viewerCanvasRef = useRef(null)
   const replaceRef = useRef(null)
   const replaceTarget = useRef(null)
   const importAt = useRef(null)
@@ -752,13 +740,10 @@ export default function App() {
     api.savePositions(items).catch(() => {})
   }, [])
   // 双击数据节点 → 打开大图查看器（缩略图太小，抠图这种活必须能放大看）
+  // 查看器本体在 ImageViewer.jsx —— 资源面板里的图片文件双击也走同一个组件
   const onNodeDoubleClick = useCallback((evt, node) => {
     const d = node?.data
     if (node?.type !== 'resource' || !d?.hasImage) return
-    setViewerFit(true)
-    setViewerSize(null)
-    setViewerPixel(null)
-    viewerCanvasRef.current = null // 新图要重新画一次，别拿着上一张的像素表
     setViewer({
       name: d.name,
       mtime: d.mtime,
@@ -770,74 +755,6 @@ export default function App() {
       index: d.index,
     })
   }, [])
-
-  /* 查看器：把图原样画进离屏 canvas（只画一次），供像素读数查表。
-     用 naturalWidth/Height 建画布 = 图内像素坐标，和渲染缩放无关。 */
-  const captureViewerImage = useCallback(() => {
-    const img = viewerImgRef.current
-    if (!img || !img.complete || !img.naturalWidth) return
-    const c = document.createElement('canvas')
-    c.width = img.naturalWidth
-    c.height = img.naturalHeight
-    const ctx = c.getContext('2d', { willReadFrequently: true })
-    if (!ctx) return
-    ctx.drawImage(img, 0, 0)
-    viewerCanvasRef.current = c
-  }, [])
-
-  const onViewerImgLoad = useCallback(() => captureViewerImage(), [captureViewerImage])
-
-  // 命中浏览器缓存时，load 事件可能早于 React 绑定（甚至根本不派发），这里兜一次
-  useEffect(() => {
-    if (viewer) captureViewerImage()
-  }, [viewer, captureViewerImage])
-
-  /* 光标在图内 → 换算出图内像素坐标，读那一个像素（RGBA）。
-     1×1 的 getImageData 而不是缓存整张：大图（比如 2735×365、甚至上万边）
-     全缓存动辄几十 MB，逐点读既省内存又够快。 */
-  const onViewerMove = useCallback((ev) => {
-    const c = viewerCanvasRef.current
-    if (!c || !c.width || !c.height) return
-    const r = ev.currentTarget.getBoundingClientRect()
-    if (r.width < 1 || r.height < 1) return
-    const x = Math.floor(((ev.clientX - r.left) / r.width) * c.width)
-    const y = Math.floor(((ev.clientY - r.top) / r.height) * c.height)
-    if (x < 0 || y < 0 || x >= c.width || y >= c.height) {
-      setViewerPixel(null)
-      return
-    }
-    const ctx = c.getContext('2d')
-    if (!ctx) return
-    const d = ctx.getImageData(x, y, 1, 1).data
-    setViewerPixel({ x, y, r: d[0], g: d[1], b: d[2], a: d[3] })
-  }, [])
-
-  /* 查看器里滚轮缩放：以光标为锚点，缩放后把滚动位置挪回去 */
-  useEffect(() => {
-    const el = viewerStageRef.current
-    if (!el || !viewer) return undefined
-    const onWheel = (ev) => {
-      const img = viewerImgRef.current
-      if (!img) return
-      const r = img.getBoundingClientRect()
-      if (r.width < 2) return
-      ev.preventDefault()
-      // 先把「光标指到的那一点」记下来，再改尺寸 —— 之后布局回来对账
-      viewerAnchorRef.current = anchorZoom(el, img, ev.clientX, ev.clientY)
-      const w = Math.min(20000, Math.max(16, r.width * wheelZoom(ev.deltaY)))
-      setViewerSize({ w: Math.round(w), h: Math.max(1, Math.round((r.height * w) / r.width)) })
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [viewer])
-
-  useEffect(() => enableMiddleDragPan(viewerStageRef.current), [viewer])
-
-  useLayoutEffect(() => {
-    const f = viewerAnchorRef.current
-    viewerAnchorRef.current = null
-    if (f) f()
-  }, [viewerSize])
 
   const addProcess = useCallback(
     async (defId, x, y) => {
@@ -1109,7 +1026,7 @@ export default function App() {
         setMenu(null)
         setShowSettings(false)
         setCanvasPop(null)
-        setViewer(null)
+        // 大图查看器的 Esc 由 ImageViewer 自己处理（它两边共用，见 ImageViewer.jsx）
         setEditing(null)
         return
       }
@@ -1713,95 +1630,19 @@ export default function App() {
         </div>
       ) : null}
 
-      {/* 双击数据节点打开的大图查看器 */}
+      {/* 双击数据节点打开的大图查看器（本体在 ImageViewer.jsx；资源面板里的图片文件双击也用它） */}
       {viewer ? (
-        <div className="viewer-mask">
-          <div className="viewer-bar">
-            <span className={`badge ${viewer.kind === 'input' ? 'input' : 'output'}`}>
-              {viewer.name}
-            </span>
-            <span className="viewer-name">
-              {viewer.kind === 'input' ? '输入图' : `输出 #${(viewer.index ?? 0) + 1}`}
-            </span>
-            <span className="spacer" />
-            {/* 光标下那一像素的通道值（图内像素坐标）。没有 alpha 通道的图只显示 RGB */}
-            <span
-              className="viewer-pixel"
-              title="把鼠标移到图上，这里显示光标处像素的通道值"
-            >
-              {viewerPixel ? (
-                <>
-                  <span className="viewer-swatch">
-                    <i
-                      style={{
-                        backgroundColor: `rgba(${viewerPixel.r},${viewerPixel.g},${
-                          viewerPixel.b
-                        },${(viewerPixel.a / 255).toFixed(3)})`,
-                      }}
-                    />
-                  </span>
-                  <span className="viewer-xy">
-                    {viewerPixel.x}, {viewerPixel.y}
-                  </span>
-                  <span className="viewer-color">
-                    {`Color(${viewerPixel.r}, ${viewerPixel.g}, ${viewerPixel.b}${
-                      viewer.alpha ? `, ${viewerPixel.a}` : ''
-                    })`}
-                  </span>
-                  <span className="viewer-hex">
-                    {`#${hex2(viewerPixel.r)}${hex2(viewerPixel.g)}${hex2(viewerPixel.b)}${
-                      viewer.alpha ? hex2(viewerPixel.a) : ''
-                    }`}
-                  </span>
-                </>
-              ) : (
-                <span className="viewer-idle">像素 —</span>
-              )}
-            </span>
-            <span className="viewer-meta">
-              {viewer.width && viewer.height ? `${viewer.width} × ${viewer.height}` : null}
-              {viewer.format ? ` · ${viewer.format}` : null}
-            </span>
-            <button
-              className="tiny"
-              onClick={() => {
-                setViewerSize(null)
-                setViewerFit((v) => !v)
-              }}
-            >
-              {viewerFit ? '实际大小' : '适应窗口'}
-            </button>
-            <button className="tiny" onClick={() => setViewer(null)}>
-              关闭 (Esc)
-            </button>
-          </div>
-          <div className={`viewer-stage ${viewerFit ? 'fit' : 'actual'}`} ref={viewerStageRef}>
-            <img
-              ref={viewerImgRef}
-              src={api.imageUrl(state?.canvasId, viewer.name, viewer.mtime)}
-              alt={viewer.name}
-              draggable={false}
-              title="滚轮缩放 · 中键拖动平移 · 双击切换「适应窗口 / 实际大小」"
-              onLoad={onViewerImgLoad}
-              onMouseMove={onViewerMove}
-              onMouseLeave={() => setViewerPixel(null)}
-              onDoubleClick={() => {
-                setViewerSize(null)
-                setViewerFit((v) => !v)
-              }}
-              style={
-                viewerSize
-                  ? {
-                      width: viewerSize.w,
-                      height: viewerSize.h,
-                      maxWidth: 'none',
-                      maxHeight: 'none',
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        </div>
+        <ImageViewer
+          src={api.imageUrl(state?.canvasId, viewer.name, viewer.mtime)}
+          badge={viewer.name}
+          badgeKind={viewer.kind === 'input' ? 'input' : 'output'}
+          subtitle={viewer.kind === 'input' ? '输入图' : `输出 #${(viewer.index ?? 0) + 1}`}
+          width={viewer.width}
+          height={viewer.height}
+          format={viewer.format}
+          alpha={viewer.alpha}
+          onClose={() => setViewer(null)}
+        />
       ) : null}
 
       {/* 双击区域预览打开的区域编辑器 */}

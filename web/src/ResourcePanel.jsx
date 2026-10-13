@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from './api'
+import ImageViewer from './ImageViewer'
 
 /* 拖拽资源文件用的自定义 MIME。
  *
@@ -41,7 +42,7 @@ const FileIco = () => (
 )
 
 /* 一层目录的行。递归渲染展开的子目录 —— 数据都在父组件的 tree / expanded 里。 */
-function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu }) {
+function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu, onPreview }) {
   const node = tree[rel]
   if (!node) return null
   const pad = { paddingLeft: 8 + depth * 13 }
@@ -72,9 +73,10 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu }) {
             <div
               className={`res-row file${e.isImage ? ' img' : ''}`}
               style={pad}
-              title={e.isImage ? `${e.name}\n拖到画布即可新建数据节点` : `${e.name}\n（不是图片，不能拖）`}
+              title={e.isImage ? `${e.name}\n拖到画布即新建数据节点 · 双击预览` : `${e.name}\n（不是图片，不能拖）`}
               draggable={!!e.isImage}
               onDragStart={e.isImage ? (ev) => onDragStart(ev, e) : undefined}
+              onDoubleClick={e.isImage ? () => onPreview(e) : undefined}
               onContextMenu={(ev) => onMenu(ev, { type: 'file', rel: e.rel, name: e.name })}
             >
               {e.isImage ? (
@@ -95,6 +97,7 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu }) {
               onToggle={onToggle}
               onDragStart={onDragStart}
               onMenu={onMenu}
+              onPreview={onPreview}
             />
           ) : null}
         </React.Fragment>
@@ -126,6 +129,9 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   const [dlg, setDlg] = useState(null)     // { kind:'mkdir'|'rename'|'delete', … }
   const [dlgErr, setDlgErr] = useState('')
   const [busyAct, setBusyAct] = useState(false)
+  // 双击图片文件打开的大图查看器（与数据节点共用 ImageViewer）。
+  // info 是服务端读文件头得到的信息，拿不到也不影响看图 —— 尺寸交给图片自身兜底
+  const [preview, setPreview] = useState(null) // { rel, name, mtime, info }
 
   // 面板宽度（可拖右边框改，记 localStorage）
   const [width, setWidth] = useState(() => {
@@ -195,6 +201,7 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     setEditing(false)
     setMenu(null)
     setDlg(null)
+    setPreview(null)
     if (dir) load('')
   }, [dir, state?.workspace, load])
 
@@ -232,6 +239,18 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   const onDragStart = (ev, entry) => {
     ev.dataTransfer.setData(RESOURCE_DRAG_MIME, entry.rel)
     ev.dataTransfer.effectAllowed = 'copy'
+  }
+
+  // 双击图片文件 → 大图查看器。先把图开出来（框会立刻显示），图片信息随后补上
+  const openPreview = async (entry) => {
+    setPreview({ rel: entry.rel, name: entry.name, mtime: entry.mtime, info: null })
+    try {
+      const info = await api.resourceInfo(entry.rel)
+      // 这期间用户可能已经关掉、或又双击了别的图 —— 只认当前这一张
+      setPreview((p) => (p && p.rel === entry.rel ? { ...p, info } : p))
+    } catch (e) {
+      /* 读不到信息不挡看图：尺寸用图片自身兜底、像素读数只显示 RGB */
+    }
   }
 
   const applyDir = async (path) => {
@@ -396,6 +415,7 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
             onToggle={toggleDir}
             onDragStart={onDragStart}
             onMenu={openMenu}
+            onPreview={openPreview}
           />
         </div>
       )}
@@ -504,6 +524,27 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
                 </div>
               </div>
             </div>,
+            document.body,
+          )
+        : null}
+
+      {/* 双击图片文件打开的大图查看器 —— 与数据节点双击是同一个组件 */}
+      {preview
+        ? createPortal(
+            <ImageViewer
+              src={api.resourceRawUrl(preview.rel, preview.mtime)}
+              badge={preview.name}
+              subtitle={
+                preview.rel.includes('/')
+                  ? preview.rel.slice(0, preview.rel.lastIndexOf('/'))
+                  : '资源目录根'
+              }
+              width={preview.info?.width}
+              height={preview.info?.height}
+              format={preview.info?.format}
+              alpha={preview.info?.alpha}
+              onClose={() => setPreview(null)}
+            />,
             document.body,
           )
         : null}

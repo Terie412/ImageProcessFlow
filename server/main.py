@@ -1280,6 +1280,34 @@ def api_resourcedir_raw(path: str = ""):
     return FileResponse(p, headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/api/resourcedir/info")
+def api_resourcedir_info(path: str = ""):
+    """只读一个图片文件的尺寸 / 格式 / 有没有 alpha —— 面板里双击预览时用。
+
+    口径与 `/api/state` 里数据节点的 `width`/`height`/`format`/`alpha` **完全一致**：
+    只读文件头（Pillow 的 `open` 不解码整张），而且同样按**实际的像素模式**判断有没有
+    透明通道，不看文件后缀（一张 RGB 模式的 PNG 照样算「没有」）。
+    """
+    p = _resource_path(path)
+    if not p.is_file():
+        raise HTTPException(404, "文件不存在")
+    if p.suffix.lower() not in IMAGE_EXTS:
+        raise HTTPException(400, "不是图片文件")
+    if _PILImage is None:
+        raise HTTPException(500, "服务端没有 Pillow，读不了图片信息")
+    try:
+        with _PILImage.open(p) as im:
+            return {
+                "width": im.size[0],
+                "height": im.size[1],
+                "format": (im.format or "").upper() or None,
+                "alpha": im.mode in ("RGBA", "LA")
+                or (im.mode == "P" and "transparency" in im.info),
+            }
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"读不了这张图：{e}") from e
+
+
 @app.post("/api/resources/import-from-resource")
 def api_import_from_resource(payload: dict):
     """把资源目录里的一个图片文件**复制一份**进当前画布的图片池，成为数据节点。

@@ -11,7 +11,8 @@
   ⑤ import-from-resource：复制进当前画布图片池 + 建数据节点 + 原文件不动（只读）
   ⑥ 非图片不给导
   ⑦ 写操作：新建目录 / 重命名 / 删除（含名字校验、越界、根目录不给动）
-  ⑧ 空串 = 清除资源目录
+  ⑧ info：图片的尺寸 / 格式 / 有没有 alpha（与数据节点同一口径，坏图不 500）
+  ⑨ 空串 = 清除资源目录
 
 > 「删除」在测试里把系统回收站换成了假实现（直接删），免得跑一次测试就往真回收站里
 > 丢东西；真机上的回收站那条路见下面注释。
@@ -206,7 +207,32 @@ def run() -> None:
     check("删不存在的 → 404", expect_http(m.api_resourcedir_delete, {"path": "nope"}) == 404)
 
     print("=" * 66)
-    print("[8] 空串 = 清除资源目录")
+    print("[8] info：读图片的尺寸 / 格式 / 有没有 alpha（双击预览用）")
+    print("=" * 66)
+    from PIL import Image as PILImage  # noqa: PLC0415
+
+    PILImage.new("RGBA", (4, 3), (10, 20, 30, 40)).save(SRC / "rgba.png")
+    PILImage.new("RGB", (7, 5), (1, 2, 3)).save(SRC / "rgb.png")
+    PILImage.new("RGB", (9, 6), (1, 2, 3)).save(SRC / "pic.jpg", quality=90)
+    (SRC / "note.txt").write_text("x", encoding="utf-8")
+
+    info = m.api_resourcedir_info("rgba.png")
+    check("RGBA PNG：尺寸对", (info["width"], info["height"]) == (4, 3), str(info))
+    check("RGBA PNG：format=PNG", info["format"] == "PNG")
+    check("RGBA PNG：有 alpha", info["alpha"] is True)
+    info = m.api_resourcedir_info("rgb.png")
+    check("RGB 模式的 PNG：尺寸与格式", (info["width"], info["height"], info["format"]) == (7, 5, "PNG"))
+    check("RGB 模式的 PNG 算「没有 alpha」", info["alpha"] is False)
+    info = m.api_resourcedir_info("pic.jpg")
+    check("JPEG：格式与尺寸", (info["format"], info["width"], info["height"]) == ("JPEG", 9, 6), str(info))
+    check("JPEG：没有 alpha", info["alpha"] is False)
+    check("坏图（不是真 PNG）→ 400、不 500", expect_http(m.api_resourcedir_info, "a.png") == 400)
+    check("非图片 → 400", expect_http(m.api_resourcedir_info, "note.txt") == 400)
+    check("不存在 → 404", expect_http(m.api_resourcedir_info, "nope.png") == 404)
+    check("越界 → 400", expect_http(m.api_resourcedir_info, "../README.md") == 400)
+
+    print("=" * 66)
+    print("[9] 空串 = 清除资源目录")
     print("=" * 66)
     sp = m.api_set_resourcedir({"path": ""})
     check("清除后 state 为空串", sp.get("resourceDir") == "")
