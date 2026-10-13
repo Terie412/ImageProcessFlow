@@ -138,21 +138,39 @@ async function main() {
     })()`)
 
   // 配置区每一排的内容（同一 flex 行的元素垂直居中，中心 y 相同）
+  // 配置区每一排的内容。
+  // **按纵向重叠分组**，不是按「中心 y 相等」：同一排里带提示的那个字段更高（两行），
+  // 中心本来就对不齐 —— 那正是 `.cfg` 用 `align-items: flex-start` 的原因（见 styles.css）。
+  // 按中心去重会把「模型/尺寸/张数」判成两排，误报。
   const cfgRows = async (nodeId) =>
     J(`(() => {
       const node = document.querySelector('${sel(nodeId)}')
       const items = [...node.querySelectorAll('.cfg > .cfg-field, .cfg > .cfg-checks')]
-      const rows = new Map()
-      for (const el of items) {
-        const r = el.getBoundingClientRect()
-        const c = Math.round((r.top + r.bottom) / 2)
-        const text = el.classList.contains('cfg-checks')
-          ? [...el.querySelectorAll('.cfg-check')].map((x) => x.textContent.trim()).join('/')
-          : (el.querySelector('.cfg-label')?.textContent || '').trim()
-        if (!rows.has(c)) rows.set(c, [])
-        rows.get(c).push(text)
+        .map((el) => {
+          const r = el.getBoundingClientRect()
+          const text = el.classList.contains('cfg-checks')
+            ? [...el.querySelectorAll('.cfg-check')].map((x) => x.textContent.trim()).join('/')
+            : (el.querySelector('.cfg-label')?.textContent || '').trim()
+          return { r, text }
+        })
+        .sort((a, b) => a.r.top - b.r.top)
+      const groups = []
+      for (const it of items) {
+        const hit = groups.find(
+          (gr) =>
+            Math.min(gr.bottom, it.r.bottom) - Math.max(gr.top, it.r.top) >
+            Math.min(gr.h, it.r.height) * 0.5,
+        )
+        if (hit) {
+          hit.members.push(it.text)
+          hit.top = Math.min(hit.top, it.r.top)
+          hit.bottom = Math.max(hit.bottom, it.r.bottom)
+          hit.h = hit.bottom - hit.top
+        } else {
+          groups.push({ top: it.r.top, bottom: it.r.bottom, h: it.r.height, members: [it.text] })
+        }
       }
-      return JSON.stringify([...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v))
+      return JSON.stringify(groups.map((g) => g.members))
     })()`)
 
   const selInfo = async () => evalJs(`(() => {

@@ -204,16 +204,29 @@ async function main() {
     check('提示没有挤窄下拉框（select ≥ 90px）', widths.select >= 90, JSON.stringify(widths))
     check('提示没有溢出自段（hint ≤ field）', widths.hint <= widths.field, JSON.stringify(widths))
 
-    // 配置区排数不能因为多了一行提示就变多
+    // 配置区排数不能因为多了一行提示就变多。
+    // 按**纵向重叠**分组，不是按「中心 y 相等」：同一排里带提示的字段是两行、更高，
+    // 中心本来就对不齐（`.cfg` 因此用 align-items: flex-start，见 styles.css）。
+    // 按中心去重会把「模型/尺寸/张数」算成两排，误报。
     const rows = await J(`(() => {
       const node = document.querySelector('${sel(pid)}')
       const items = [...node.querySelectorAll('.cfg > .cfg-field, .cfg > .cfg-checks')]
-      const ys = new Set()
-      for (const el of items) {
-        const r = el.getBoundingClientRect()
-        ys.add(Math.round((r.top + r.bottom) / 2))
+        .map((el) => el.getBoundingClientRect())
+        .sort((a, b) => a.top - b.top)
+      const groups = []
+      for (const r of items) {
+        const hit = groups.find(
+          (g) => Math.min(g.bottom, r.bottom) - Math.max(g.top, r.top) > Math.min(g.h, r.height) * 0.5,
+        )
+        if (hit) {
+          hit.top = Math.min(hit.top, r.top)
+          hit.bottom = Math.max(hit.bottom, r.bottom)
+          hit.h = hit.bottom - hit.top
+        } else {
+          groups.push({ top: r.top, bottom: r.bottom, h: r.height })
+        }
       }
-      return JSON.stringify([...ys])
+      return JSON.stringify(groups.map(() => true))
     })()`)
     check('配置区仍是两排（提示没多推出一排）', rows.length <= 2, `rows=${rows.length}`)
 
