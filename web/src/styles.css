@@ -829,19 +829,15 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .react-flow__edge-path { stroke-width: 1.5; }
 
 /* ---------------- 节点缩放手柄（右下角一个小方块） ---------------- */
+/* 右下角的缩放手柄：**完全不可见**，只靠 cursor: nwse-resize 提示（和资源面板右侧的
+   拖宽手柄同一个做法 —— 用户明确不要那个方块）。
+   尺寸和位置都**别动**：`node-foot` 底下那 18px 空带就是按 12 + 3 留的，
+   一放大手柄就会压到「执行」按钮上。 */
 .resize-handle {
   position: absolute; right: 3px; bottom: 3px; z-index: 5;
   width: 12px; height: 12px;
-  border-radius: 3px;
-  background: #3a4453;
-  border: 1px solid #59647a;
   cursor: nwse-resize;
   touch-action: none;
-}
-.node:hover .resize-handle,
-.node.selected .resize-handle {
-  background: var(--accent);
-  border-color: #9cc8fb;
 }
 
 /* ---------------- 顶栏的画布选择器 ----------------

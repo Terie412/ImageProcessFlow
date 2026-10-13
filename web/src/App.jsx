@@ -598,7 +598,7 @@ export default function App() {
     [applyState, flash],
   )
 
-  // 拖节点右下角的小方块改尺寸。
+  // 拖节点右下角改尺寸（那是个 12×12 的**不可见**热区，只靠光标提示）。
   // 自己实现而不用 React Flow 的 NodeResizer：后者在无头环境下对合成 pointer 事件不响应，
   // 而且我们只要右下角一个手柄，自己写反而更短更可控。
   const onResizeStart = useCallback(
