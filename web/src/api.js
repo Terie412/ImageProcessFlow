@@ -27,7 +27,8 @@ const patch = (url, body) =>
   }).then(J)
 
 export const getState = () => fetch('/api/state').then(J)
-export const reloadRegistry = () => post('/api/registry/reload')
+// 脚本注册表重载（`POST /api/registry/reload`）是**开发者接口**，界面上没有入口 ——
+// 服务端启动时扫一次 scripts/，改完脚本重启服务即可。要手工触发就用 curl。
 export const updateSettings = (payload) => patch('/api/settings', payload)
 
 /* 画布：一个工作目录里可以有多个，切换/新建/改名/删除都返回整包状态 */

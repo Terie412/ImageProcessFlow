@@ -52,6 +52,8 @@ SETTINGS_FILE = APP_ROOT / "settings.json"
 DEFAULT_SETTINGS: dict = {
     # 删除数据节点（会永久删掉磁盘上的图片）前是否弹确认框
     "confirmDeleteDataNode": True,
+    # 执行日志面板：打开时执行节点会在右下角显示实时日志（默认关，界面偏好）
+    "showLog": False,
     # 提示词润色用的文本模型：这里存的是「环境变量名」，真正的 key 运行时从环境变量取
     "textModelKeyEnv": "DEEPSEEK_API_KEY",
     # 润色用的模型名（DeepSeek 里只有它支持图片输入）

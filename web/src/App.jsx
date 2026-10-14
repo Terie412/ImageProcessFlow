@@ -514,10 +514,10 @@ export default function App() {
   )
 
   /* ---------------- 执行日志 ----------------
-     日志数据（drawer）在执行期间始终收集，但面板**默认不弹出**；
-     顶栏「执行日志」按钮随时可以点开看最近一次（进行中也行）。
-     失败时 toast 会照常报错，不看日志也不会漏掉失败这件事。 */
-  const [logOpen, setLogOpen] = useState(false)
+     日志数据（drawer）在执行期间始终收集，面板显不显示由设置项 `showLog` 决定：
+     **默认关**，要看去 ⚙ → 设置里打开（这是界面偏好，不跟着某一次执行走）。
+     关着的时候失败照样弹 toast，不看日志也不会漏掉失败这件事。 */
+  const logOpen = !!state?.settings?.showLog
 
   const onExecute = useCallback(
     async (pid) => {
@@ -905,15 +905,6 @@ export default function App() {
     },
     [applyState, flash],
   )
-
-  const reloadScripts = useCallback(async () => {
-    try {
-      applyState(await api.reloadRegistry())
-      flash('已重新加载脚本目录')
-    } catch (e) {
-      flash(e.message)
-    }
-  }, [applyState, flash])
 
   // 整张画布重新排版：分层列布局，处理节点 / 输出节点 / 输入图全都重排
   const formatAll = useCallback(async () => {
@@ -1319,17 +1310,6 @@ export default function App() {
           <button className="tb-act" onClick={() => importRef.current?.click()} disabled={!state?.workspace}>
             ＋ 导入图片
           </button>
-          <button className="tb-ghost" onClick={reloadScripts}>
-            重新加载脚本
-          </button>
-          <button
-            className="tb-ghost"
-            onClick={() => setLogOpen(true)}
-            disabled={!drawer}
-            title="查看最近一次执行的日志"
-          >
-            执行日志{drawer?.status === 'running' ? '（进行中…）' : ''}
-          </button>
 
           <div className="settings-wrap">
             <button
@@ -1350,6 +1330,18 @@ export default function App() {
                   />
                   <span>删除数据节点前弹出确认</span>
                 </label>
+
+                <label className="set-row">
+                  <input
+                    type="checkbox"
+                    checked={!!state?.settings?.showLog}
+                    onChange={(e) => saveSetting('showLog', e.target.checked)}
+                  />
+                  <span>显示执行日志</span>
+                </label>
+                <div className="set-note">
+                  打开后执行节点时右下角显示实时日志；面板上的「关闭」等于把这里关掉
+                </div>
 
                 <div className="set-sep" />
                 <div className="set-group">提示词润色（DeepSeek）</div>
@@ -1634,7 +1626,11 @@ export default function App() {
               {drawer.status === 'running' ? '进行中…' : drawer.status === 'error' ? '失败' : '完成'}
             </span>
             <span className="spacer" />
-            <button className="tiny" onClick={() => setLogOpen(false)}>
+            <button
+              className="tiny"
+              title="收起面板（等于把设置里的「显示执行日志」关掉）"
+              onClick={() => saveSetting('showLog', false)}
+            >
               关闭
             </button>
           </div>
