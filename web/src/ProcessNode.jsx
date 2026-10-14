@@ -281,31 +281,34 @@ export default function ProcessNode({ id, data, selected }) {
                 </div>
               )
             })}
-            {portSpecs.length > 0 ? (
-              <div className="port-ctl">
-                {/* 「填充」：把画布上**选中的数据节点**按距离填进输入口。
-                    固定单口的节点（裁剪 / 区域抹除）也带这个按钮 —— 那时只填最近的一个。
-                    没选中数据节点时后端会回一条明确的错误，前端弹 toast。 */}
+            {/* 控件**常驻**在输入栏底部 —— 不能跟着 portSpecs 走：
+                AI 生图那个动态口的 min 就是 0，全删光之后这里要是也没了，
+                就再也加不回来了（一个空栏、没有任何入口）。
+                位置交给 CSS 的 margin-top: auto 钉在栏底，不随口数上下跑。 */}
+            <div className="port-ctl">
+              {/* 「填充」：把画布上**选中的数据节点**按距离填进输入口。
+                  固定单口的节点（裁剪 / 区域抹除）也带这个按钮 —— 那时只填最近的一个。
+                  口数归零时它也管用：端点数量按选中数量补回来（多删少补）。
+                  没选中数据节点时后端会回一条明确的错误，前端弹 toast。 */}
+              <button
+                className="pin-btn nodrag fill-btn"
+                title="把画布上选中的数据节点按距离填入输入口（端口数量多删少补，已连的会被覆盖）"
+                onClick={() => onFillInputs(id)}
+              >
+                ⇥
+              </button>
+              {portGroups.map((g) => (
                 <button
-                  className="pin-btn nodrag fill-btn"
-                  title="把画布上选中的数据节点按距离填入输入口（端口数量多删少补，已连的会被覆盖）"
-                  onClick={() => onFillInputs(id)}
+                  key={g.key}
+                  className="pin-btn nodrag"
+                  title="新增一个输入"
+                  disabled={g.count >= g.max}
+                  onClick={() => onPorts(id, g.key, g.count + 1)}
                 >
-                  ⇥
+                  ＋
                 </button>
-                {portGroups.map((g) => (
-                  <button
-                    key={g.key}
-                    className="pin-btn nodrag"
-                    title="新增一个输入"
-                    disabled={g.count >= g.max}
-                    onClick={() => onPorts(id, g.key, g.count + 1)}
-                  >
-                    ＋
-                  </button>
-                ))}
-              </div>
-            ) : null}
+              ))}
+            </div>
           </div>
         ) : null}
 

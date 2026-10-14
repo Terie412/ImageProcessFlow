@@ -359,8 +359,12 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .port-row .row-del:disabled { opacity: .3; }
 
-/* 底部只留「＋」：新增一个输入口（紧跟在最后一个输入口下方，右对齐，与减号同列） */
+/* 输入栏**底部**的控件：`＋`（新增一个输入口）与「填充输入」。
+   `margin-top: auto` 把它钉在栏底 —— 口数变化时它不会跟着上下跑，
+   口数归零时也照样在（那里是唯一能加回输入口的入口）。
+   右对齐 = 与每行右侧的减号同列。 */
 .port-ctl {
+  margin-top: auto;
   display: flex; justify-content: flex-end; gap: 10px;
   padding: 2px 6px 0;
 }
