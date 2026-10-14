@@ -1255,19 +1255,29 @@ export default function App() {
 
             {canvasPop === 'list' ? (
               <div className="canvas-pop">
-                {(state?.canvases || []).map((c) => (
-                  <button
-                    key={c.id}
-                    className={`ctx-item${c.id === state?.canvasId ? ' on' : ''}`}
-                    onClick={() => {
-                      setCanvasPop(null)
-                      switchCanvas(c.id)
-                    }}
-                  >
-                    {c.name}
-                    {c.nodeCount ? `（${c.nodeCount}）` : ''}
-                  </button>
-                ))}
+                {/* 按名字排序：数字前缀按**数值**比，所以 `2.png` 排在 `10.png` 前面。
+                    原顺序是画布内部的创建次序（新建的都追加在末尾），跟名字无关，
+                    所以 `5.png` 会掉到最后。这里只影响下拉的显示次序，
+                    不动 `doc.canvases` 本身 —— 那份顺序另有用途（如默认新画布编号）。 */}
+                {[...(state?.canvases || [])]
+                  .sort((a, b) =>
+                    String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+                      numeric: true,
+                    }),
+                  )
+                  .map((c) => (
+                    <button
+                      key={c.id}
+                      className={`ctx-item${c.id === state?.canvasId ? ' on' : ''}`}
+                      onClick={() => {
+                        setCanvasPop(null)
+                        switchCanvas(c.id)
+                      }}
+                    >
+                      {c.name}
+                      {c.nodeCount ? `（${c.nodeCount}）` : ''}
+                    </button>
+                  ))}
               </div>
             ) : null}
 
