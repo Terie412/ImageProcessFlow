@@ -110,7 +110,9 @@ body {
 .settings-wrap .icon-btn:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line); color: var(--text); }
 .settings-pop {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 45;
-  min-width: 390px; padding: 6px;
+  /* 收窄到「最宽的一行刚好放下」的宽度（API Key 那行的标签 + 150px 输入框）。
+     再宽就只是让 label 和控件之间的空白变大 —— 面板里没有需要更长跑道的内容。 */
+  min-width: 320px; padding: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, .62);
 }
@@ -134,14 +136,14 @@ body {
 }
 .settings-pop .set-field > .set-size { flex: 0 0 auto; }
 .settings-pop .set-field input {
-  width: 170px; font: inherit; font-size: 11.5px; color: var(--text);
+  width: 150px; font: inherit; font-size: 11.5px; color: var(--text);
   background: #12141a; border: 1px solid var(--line); border-radius: 5px;
   padding: 4px 7px; outline: none;
 }
 .settings-pop .set-field input:focus { border-color: var(--accent); }
 /* 「节点最小尺寸」：两个数字框中间夹一个 × */
 .settings-pop .set-size { display: flex; align-items: center; gap: 6px; }
-.settings-pop .set-size input { width: 72px; padding: 4px 6px; }
+.settings-pop .set-size input { width: 64px; padding: 4px 6px; }
 .settings-pop .set-x { color: var(--muted); font-size: 11px; }
 
 /* 「节点尺寸」表：一列类型 + 一列初始尺寸（w × h），值来自服务端的 sizeSpec。
