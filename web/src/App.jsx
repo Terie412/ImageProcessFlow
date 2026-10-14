@@ -867,6 +867,10 @@ export default function App() {
       e.target.value = ''
       if (!files.length) return
       setBusy(true)
+      // 右键菜单里的「导入图片…」已经去掉了（顶栏那个「＋ 导入图片」就够），
+      // 所以 importAt 现在恒为 null、走下面的兜底落点。这一层特意留着 ——
+      // 「先记一个落点、再触发文件选择」的链路本身仍然可用，将来要加
+      // 「在某处导入」时把 importAt.current 写上就行。
       const at = importAt.current
       importAt.current = null
       try {
@@ -1566,20 +1570,6 @@ export default function App() {
                 </button>
               ))
             )}
-
-            <div className="ctx-sep" />
-
-            <div className="ctx-title">数据节点</div>
-            <button
-              className="ctx-item"
-              onClick={() => {
-                importAt.current = { x: menu.flowX, y: menu.flowY }
-                setMenu(null)
-                importRef.current?.click()
-              }}
-            >
-              导入图片…
-            </button>
 
             <div className="ctx-sep" />
 
