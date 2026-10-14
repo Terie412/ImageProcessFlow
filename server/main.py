@@ -821,12 +821,39 @@ def api_set_workspace(payload: dict):
     return state_payload()
 
 
+def _nudge_foreground() -> None:
+    """让紧接着弹出的原生对话框能真正拿到键盘焦点。
+
+    服务端是个**长期在后台跑**的进程，而用户点「下载」那一刻输入焦点在浏览器上。
+    这种情形下 Windows 会按「防焦点窃取」的规则拦掉对话框成为前台窗口的请求 ——
+    对话框照样显示出来，但里面的文件名输入框收不到键盘输入，必须先拿鼠标点一下。
+
+    发一对 Alt 按下 / 抬起能让系统认为「用户刚操作过」，从而放行（社区里的老办法）。
+    它只争取「能不能成为前台窗口」，不产生任何实际输入，也不改变别的窗口状态。
+
+    非 Windows 直接跳过（`ctypes.windll` 不存在），所以整段包在 try 里。
+    """
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        user32.keybd_event(0x12, 0, 0, 0)       # Alt 按下
+        user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt 抬起
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _tk_pick_directory(initial: str | None) -> str | None:
     import tkinter as tk
     from tkinter import filedialog
 
+    _nudge_foreground()
     root = tk.Tk()
     root.withdraw()
+    # Windows 上**必须**先让 Tk 跑完一轮事件处理再弹对话框，否则对话框是在
+    # 「主窗口还没画出来」的状态下创建的，里面的输入框拿不到键盘焦点 ——
+    # 表现就是「必须先用鼠标点一下才能改名字」。见 CPython issue 34253。
+    root.update_idletasks()
     try:
         root.attributes("-topmost", True)
     except Exception:  # noqa: BLE001
@@ -841,8 +868,13 @@ def _tk_save_as(initial_dir: str, initial_file: str) -> str | None:
     import tkinter as tk
     from tkinter import filedialog
 
+    _nudge_foreground()
     root = tk.Tk()
     root.withdraw()
+    # 同 _tk_pick_directory：弹之前先 update_idletasks，否则文件名输入框拿不到
+    # 键盘焦点（CPython issue 34253）—— 这正是「点了下载、还得先用鼠标点一下
+    # 文件名才能改名」的成因。
+    root.update_idletasks()
     try:
         root.attributes("-topmost", True)
     except Exception:  # noqa: BLE001
