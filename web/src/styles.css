@@ -365,6 +365,9 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
 }
 .pin-btn:hover:not(:disabled) { color: var(--text); border-color: #4a5563; }
+/* 「填充输入」按钮：把选中的数据节点按距离拉进来（端口多删少补、已连的覆盖）。
+   hover 走强调色，和旁边那个「＋」区分开 —— 一个是拉数据，一个是加口。 */
+.port-ctl .fill-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
 
 /* 提示词：节点的主体（在右栏，左栏是输入口）。
    框和「润色 / 撤销」左右并排，按钮贴在这一行的右下角 */

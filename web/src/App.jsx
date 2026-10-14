@@ -609,6 +609,28 @@ export default function App() {
     [applyState, flash],
   )
 
+  /* 「填充输入」：把当前画布上**选中的数据节点**按「离本节点的距离」填进输入口。
+     顺序在服务端算（那里才有节点坐标的权威副本）；这里只把选中的 id 送过去。
+     端口数量多删少补、已连的覆盖、本节点自己的产出会被排除 —— 规则见
+     `api_fill_inputs`。 */
+  const onFillInputs = useCallback(
+    async (pid) => {
+      const ids = (selectionRef.current.nodes || [])
+        .filter((n) => n.type === 'resource')
+        .map((n) => n.id)
+      if (!ids.length) {
+        flash('先在画布上选中要填入的数据节点')
+        return
+      }
+      try {
+        applyState(await api.fillInputs(pid, ids))
+      } catch (e) {
+        flash(e.message)
+      }
+    },
+    [applyState, flash],
+  )
+
   // 拖节点右下角改尺寸（那是个 12×12 的**不可见**热区，只靠光标提示）。
   // 自己实现而不用 React Flow 的 NodeResizer：后者在无头环境下对合成 pointer 事件不响应，
   // 而且我们只要右下角一个手柄，自己写反而更短更可控。
@@ -699,11 +721,11 @@ export default function App() {
 
   const cbs = useMemo(
     () => ({
-      onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onPolish,
+      onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onFillInputs, onPolish,
       onDetect, onEditRegions,
       onResizeStart,
     }),
-    [onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onPolish,
+    [onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onFillInputs, onPolish,
      onDetect, onEditRegions, onResizeStart],
   )
   cbsRef.current = cbs

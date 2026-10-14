@@ -70,6 +70,7 @@ export default function ProcessNode({ id, data, selected }) {
     onExecute,
     onPorts,
     onRemovePort,
+    onFillInputs,
     onPolish,
     onDetect,
     onEditRegions,
@@ -280,8 +281,18 @@ export default function ProcessNode({ id, data, selected }) {
                 </div>
               )
             })}
-            {portGroups.length > 0 ? (
+            {portSpecs.length > 0 ? (
               <div className="port-ctl">
+                {/* 「填充」：把画布上**选中的数据节点**按距离填进输入口。
+                    固定单口的节点（裁剪 / 区域抹除）也带这个按钮 —— 那时只填最近的一个。
+                    没选中数据节点时后端会回一条明确的错误，前端弹 toast。 */}
+                <button
+                  className="pin-btn nodrag fill-btn"
+                  title="把画布上选中的数据节点按距离填入输入口（端口数量多删少补，已连的会被覆盖）"
+                  onClick={() => onFillInputs(id)}
+                >
+                  ⇥
+                </button>
                 {portGroups.map((g) => (
                   <button
                     key={g.key}

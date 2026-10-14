@@ -1847,6 +1847,86 @@ def api_create_edge(payload: dict):
     return state_payload()
 
 
+@app.post("/api/processes/{pid}/fill-inputs")
+def api_fill_inputs(pid: str, payload: dict):
+    """把一批数据节点按「离本节点左上角的距离」填进这个处理节点的输入口。
+
+    规则（2026-10-14 与用户确认）：
+
+    - **端口多删少补**：动态口的数量直接改成选中数量（夹在 manifest 的 min/max 之间）——
+      选了 4 个而当前只展开 2 个就补到 4，当前展开 8 个就砍到 4（砍掉的口上的连线一并断开）。
+      固定单口节点（裁剪 / 区域抹除）没有数量概念，只填第一个。
+    - **覆盖**：本节点输入口上的旧连线先全部摘掉，再按新顺序重连。
+    - **排除本节点自己产出的**输出型数据节点（连上就是自环）。
+    - **顺序** = 到本节点左上角的欧氏距离，越近越靠前 —— 这决定谁是「参考图1」。
+      在前端算不了：节点坐标的权威副本在服务端这里。
+    """
+    ids = [i for i in ((payload or {}).get("resources") or []) if isinstance(i, str)]
+    with LOCK:
+        g = graph()
+        p = engine_mod._process(g, pid)  # noqa: SLF001
+        if p is None:
+            raise HTTPException(404, "处理节点不存在")
+        m = STATE["registry"].get(p.get("defId")) or {}
+        inputs = m.get("inputs") or []
+        if not inputs:
+            raise HTTPException(400, "这个节点没有输入口")
+
+        # 候选：得在本画布上，且不是本节点自己产出的图；同一个图只算一次
+        seen: set[str] = set()
+        picked: list[dict] = []
+        for rid in ids:
+            if rid in seen:
+                continue
+            r = engine_mod._resource(g, rid)  # noqa: SLF001
+            if r is None or r.get("producer") == pid:
+                continue
+            seen.add(rid)
+            picked.append(r)
+        if not picked:
+            raise HTTPException(400, "选中的数据节点里没有可作输入的（本节点自己的产出会被排除）")
+
+        # 顺序：到本节点左上角的距离，越近越靠前
+        px, py = float(p.get("x") or 0), float(p.get("y") or 0)
+        picked.sort(
+            key=lambda r: (
+                (float(r.get("x") or 0) - px) ** 2 + (float(r.get("y") or 0) - py) ** 2,
+                float(r.get("y") or 0),
+                float(r.get("x") or 0),
+            )
+        )
+
+        # 端口数量：多删少补（当前所有节点都只有一个输入声明，取 inputs[0]）
+        spec = inputs[0]
+        if spec.get("dynamic"):
+            group = spec["key"]
+            lo = int(spec.get("min", 0))
+            hi = int(spec.get("max", 99))
+            count = max(lo, min(hi, len(picked)))
+            p.setdefault("ports", {})
+            p["ports"][group] = count
+            keys = [f"{group}{i + 1}" for i in range(count)]
+        else:
+            keys = [spec["key"]]
+            picked = picked[:1]
+
+        # 覆盖：本节点输入口上的旧连线**全部**摘掉，随后按新顺序重连。
+        # 不能只删「新旧端口有交集」的那部分 —— 缩口时失效端口上的线会留下来，
+        # 变成既不在端口表里、又挂在节点上的孤儿边（实测踩到过）。
+        g["edges"] = [e for e in g["edges"] if e["to"] != pid]
+
+        # 按顺序重连；会成环的跳过（直接产出已在上面排除，这里兜住更深的下游）
+        for key, r in zip(keys, picked):
+            prod = r.get("producer")
+            if prod and _reaches(g, pid, prod):
+                continue
+            g["edges"].append({"id": new_id("e"), "from": r["id"], "to": pid, "port": key})
+
+        p["dirty"] = True
+        persist()
+    return state_payload()
+
+
 @app.delete("/api/edges/{edge_id}")
 def api_delete_edge(edge_id: str):
     with LOCK:

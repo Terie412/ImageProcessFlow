@@ -60,6 +60,10 @@ export const deleteNode = (id) =>
   fetch(`/api/nodes/${id}`, { method: 'DELETE' }).then(J)
 
 export const createEdge = (from, to, port) => post('/api/edges', { from, to, port })
+// 「填充输入」：把一批数据节点按到本节点的距离填进它的输入口
+// （端口多删少补、已连的覆盖、本节点自己的产出会被排除；顺序由服务端算）
+export const fillInputs = (id, resourceIds) =>
+  post(`/api/processes/${id}/fill-inputs`, { resources: resourceIds })
 export const deleteEdge = (id) =>
   fetch(`/api/edges/${id}`, { method: 'DELETE' }).then(J)
 
