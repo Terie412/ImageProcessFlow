@@ -107,7 +107,7 @@ def part_a() -> None:
               g[:2] == init and g[2:] == mn, str(got))
 
     q = t["process:ai_image"]
-    print(f"   Qwen 生图：{q}")
+    print(f"   AI 生图：{q}")
     check("处理节点初始尺寸取 manifest 的 size（560×300）",
           (q["w"], q["h"]) == (560, 300), str((q["w"], q["h"])))
 

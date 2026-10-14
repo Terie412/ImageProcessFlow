@@ -1,6 +1,6 @@
 {
   "id": "alpha",
-  "name": "Alpha 缩放",
+  "name": "透明度缩放",
   "entry": "alpha.py",
   "inputs": [
     {
