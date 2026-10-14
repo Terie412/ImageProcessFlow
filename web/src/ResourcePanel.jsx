@@ -14,6 +14,42 @@ export const RESOURCE_DRAG_MIME = 'application/x-ipf-resource'
 const RES_W = { min: 180, max: 640, def: 262 }
 const clampW = (v) => Math.max(RES_W.min, Math.min(RES_W.max, Math.round(v)))
 
+/* 展开状态也记 localStorage（和宽度、开合同一类），但**按资源目录的路径分开记** ——
+   换到另一个资源目录时各记各的，切回来还是原来那样。值形如：
+
+     { "E:\\glowup_project\\arts": ["主界面", "主界面/ui"] }
+
+   只存相对路径，所以换了目录也不会张冠李戴到别人的树上。 */
+const EXP_KEY = 'ipf.resExpanded'
+const EXP_KEEP = 10 // 最多保留几个资源目录的记录（对象键按插入顺序，超了丢最早那条）
+
+const readExpanded = (dir) => {
+  if (!dir) return new Set()
+  try {
+    const all = JSON.parse(localStorage.getItem(EXP_KEY) || '{}')
+    const arr = all && typeof all === 'object' ? all[dir] : null
+    // 只认字符串 —— 存储被人手改坏时也不至于把界面带崩
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string' && x) : [])
+  } catch (e) {
+    return new Set()
+  }
+}
+
+const writeExpanded = (dir, set) => {
+  if (!dir) return
+  try {
+    const raw = JSON.parse(localStorage.getItem(EXP_KEY) || '{}')
+    const all = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+    delete all[dir] // 先删再写：让这条挪到末尾，上面那个「超了丢最早」才准
+    if (set.size) all[dir] = [...set]
+    const keys = Object.keys(all)
+    for (const k of keys.slice(0, Math.max(0, keys.length - EXP_KEEP))) delete all[k]
+    localStorage.setItem(EXP_KEY, JSON.stringify(all))
+  } catch (e) {
+    /* 隐私模式下写不了，忽略 */
+  }
+}
+
 const fmtSize = (n) => {
   if (!Number.isFinite(n)) return ''
   if (n < 1024) return `${n} B`
@@ -122,6 +158,8 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
 
   const [tree, setTree] = useState({})
   const [expanded, setExpanded] = useState(() => new Set())
+  // 展开集合的镜像：写入口要拿「当前值」，而 setState 的更新函数里不该塞副作用
+  const expRef = useRef(expanded)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -189,21 +227,51 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     try {
       const r = await api.listResourceDir(rel)
       setTree((t) => ({ ...t, [rel]: { status: 'done', entries: r.entries || [], error: '' } }))
+      return true
     } catch (e) {
       setTree((t) => ({ ...t, [rel]: { status: 'error', entries: [], error: e.message } }))
+      return false
     }
   }, [])
 
-  // 指定/更换资源目录、或换了工作目录 → 整棵树重置，重新读根目录
+  /* 展开状态的**唯一写入口** —— 改了就得落盘，否则一刷新就白改 */
+  const commitExpanded = (next) => {
+    expRef.current = next
+    setExpanded(next)
+    writeExpanded(dir, next)
+  }
+
+  /* 恢复上次的展开状态：把这些层**重新读一遍** —— 读取是懒加载的，
+     不重读它们就会是空的。读不到的那些（目录被删 / 改了名 / 资源目录换了 /
+     权限变了）顺手摘掉，免得一直挂在展开集合和存储里，每次进来都白请求一次。 */
+  const restore = useCallback(
+    async (dirKey, saved) => {
+      if (!dirKey) return
+      const dirs = [...saved]
+      const [rootOk, ...childOk] = await Promise.all([load(''), ...dirs.map((rel) => load(rel))])
+      if (!rootOk) return // 根都读不到 → 保持原样，错误由根那一层自己显示
+      const alive = new Set(dirs.filter((_, i) => childOk[i]))
+      if (alive.size === dirs.length) return
+      expRef.current = alive
+      setExpanded(alive)
+      writeExpanded(dirKey, alive) // 用传进来的 key，别用 dir —— 请求期间可能已经换了目录
+    },
+    [load],
+  )
+
+  // 指定/更换资源目录、或换了工作目录 → 整棵树重置，重新读根目录；
+  // 展开状态从 localStorage 捞回来（按资源目录分开记），并把那几层一起重读
   useEffect(() => {
     setTree({})
-    setExpanded(new Set())
+    const saved = readExpanded(dir)
+    expRef.current = saved
+    setExpanded(saved)
     setEditing(false)
     setMenu(null)
     setDlg(null)
     setPreview(null)
-    if (dir) load('')
-  }, [dir, state?.workspace, load])
+    if (dir) restore(dir, saved)
+  }, [dir, state?.workspace, load, restore])
 
   // 菜单开着时：点别处 / 按 Esc 就关掉
   useEffect(() => {
@@ -218,20 +286,21 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     }
   }, [menu])
 
+  /* ↻：只把数据重读一遍（含**已经展开的那几层**），折叠状态一个都不动 ——
+     跟资源管理器里的刷新是一个意思，不是「把面板重置回初始状态」 */
   const refresh = () => {
     setTree({})
-    setExpanded(new Set())
-    if (dir) load('')
+    if (dir) restore(dir, expRef.current)
   }
 
   const toggleDir = (rel) => {
     if (expanded.has(rel)) {
       const nx = new Set(expanded)
       nx.delete(rel)
-      setExpanded(nx)
+      commitExpanded(nx)
       return
     }
-    setExpanded(new Set(expanded).add(rel))
+    commitExpanded(new Set(expanded).add(rel))
     const n = tree[rel]
     if (!n || (n.status !== 'done' && n.status !== 'loading')) load(rel)
   }
@@ -288,7 +357,7 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   const applyListing = (res) => {
     const rel = res?.path ?? ''
     setTree((t) => ({ ...t, [rel]: { status: 'done', entries: res.entries || [], error: '' } }))
-    setExpanded((prev) => new Set(prev).add(rel))
+    commitExpanded(new Set(expRef.current).add(rel))
   }
 
   // 目录被改名 / 删掉后，它下面那些缓存（tree 与展开态）全失效 —— 整枝摘掉，下次展开再读
@@ -301,13 +370,11 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
       }
       return n
     })
-    setExpanded((prev) => {
-      const n = new Set()
-      for (const k of prev) {
-        if (k !== rel && !k.startsWith(prefix)) n.add(k)
-      }
-      return n
-    })
+    const n = new Set()
+    for (const k of expRef.current) {
+      if (k !== rel && !k.startsWith(prefix)) n.add(k)
+    }
+    commitExpanded(n)
   }
 
   const submitDlg = async () => {
@@ -359,7 +426,7 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
         <span className="spacer" />
         {dir ? (
           <>
-            <button className="res-btn" title="刷新" aria-label="刷新资源目录" onClick={refresh}>
+            <button className="res-btn" title="刷新资源目录（保留展开状态）" aria-label="刷新资源目录" onClick={refresh}>
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                 <path d="M13 8a5 5 0 1 1-1.5-3.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M13 2.4V5h-2.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
