@@ -70,11 +70,11 @@ async function main() {
   // 再放一个远的节点把视野撑开：既要让 fitView 的缩放别太大，
   // 也要避免处理节点被画布右下角的 MiniMap 压住（那会挡住缩放手柄）
   await makeDataNode(60, 1100)
-  const st = await post('/api/processes', { defId: 'qwen_image', x: 420, y: 120 })
+  const st = await post('/api/processes', { defId: 'ai_image', x: 420, y: 120 })
   const pid = st.graph.processes[st.graph.processes.length - 1].id
   // 下限要取**服务端算出来的有效值**（sizeSpec），不能只看 settings.nodeMin.process ——
-  // 那只是通用兜底，`process:<defId>` 可以单独覆盖（本项目里 qwen_image 就被覆盖成 200×200）
-  const qspec = (await state()).sizeSpec['process:qwen_image']
+  // 那只是通用兜底，`process:<defId>` 可以单独覆盖（本项目里 ai_image 就被覆盖成 200×200）
+  const qspec = (await state()).sizeSpec['process:ai_image']
   const msz = qspec ? { w: qspec.minW, h: qspec.minH } : (await state()).settings.nodeMin.process
 
   let target = null

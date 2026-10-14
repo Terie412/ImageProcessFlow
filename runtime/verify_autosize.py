@@ -94,7 +94,7 @@ def part_a() -> None:
           f"裸距离选 {raw}，归一化后选 720x1280")
 
     # ---- 选项列表 = manifest 里能解析成宽高的那些 ----
-    manifest = json.loads((ROOT / "scripts" / "qwen_image" / "manifest.json").read_text("utf-8"))
+    manifest = json.loads((ROOT / "scripts" / "ai_image" / "manifest.json").read_text("utf-8"))
     check("manifest 里 size 参数声明了 autoFrom=input",
           A.auto_key(manifest) == "size", f"auto_key={A.auto_key(manifest)!r}")
     check("选项里的空值「自动」被排除",

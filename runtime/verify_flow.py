@@ -100,7 +100,7 @@ def main() -> int:
     check("两张图都落盘", after2[2] == {f"{r['name']}.png" for r in after2[0].values()}, str(sorted(after2[2])))
 
     # 给第 2 个槽位接一个下游处理节点，用于验证「槽位收缩时连线断开」
-    p2 = call("POST", "/api/processes", {"defId": "qwen_image", "x": 900, "y": 480})["graph"]["processes"][-1]["id"]
+    p2 = call("POST", "/api/processes", {"defId": "ai_image", "x": 900, "y": 480})["graph"]["processes"][-1]["id"]
     st = call("POST", "/api/edges", {"from": outs[1]["id"], "to": p2, "port": "image1"})
     check("已把第 2 个槽位接到下游节点", any(
         e["from"] == outs[1]["id"] and e["to"] == p2 for e in st["graph"]["edges"]))

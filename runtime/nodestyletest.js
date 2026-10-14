@@ -62,13 +62,13 @@ async function main() {
 
   const rid1 = await makeDataNode(60, 120)
   await makeDataNode(60, 1100) // 把视野撑开，避免处理节点被右下角 MiniMap 压住
-  const st = await post('/api/processes', { defId: 'qwen_image', x: 420, y: 120 })
+  const st = await post('/api/processes', { defId: 'ai_image', x: 420, y: 120 })
   const pid = st.graph.processes[st.graph.processes.length - 1].id
   const boot = await state()
-  const msz = boot.manifests.qwen_image.size
+  const msz = boot.manifests.ai_image.size
   // 下限要取**服务端算出来的有效值**（sizeSpec），不能只看 settings.nodeMin.process ——
-  // 那只是通用兜底，`process:<defId>` 可以单独覆盖（qwen_image 就有自己的一行）
-  const pmin = boot.sizeSpec['process:qwen_image'] || boot.settings.nodeMin.process
+  // 那只是通用兜底，`process:<defId>` 可以单独覆盖（ai_image 就有自己的一行）
+  const pmin = boot.sizeSpec['process:ai_image'] || boot.settings.nodeMin.process
 
   let target = null
   for (let i = 0; i < 120; i++) {

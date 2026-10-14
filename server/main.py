@@ -90,7 +90,7 @@ DEFAULT_SETTINGS: dict = {
         "process:alpha_erase": {"w": 200, "h": 200},
         "process:color_balance": {"w": 200, "h": 200},
         "process:crop": {"w": 220, "h": 200},
-        "process:qwen_image": {"w": 200, "h": 200},
+        "process:ai_image": {"w": 200, "h": 200},
         "process:recolor": {"w": 200, "h": 200},
         "process:region_erase": {"w": 200, "h": 200},
         "process:resize": {"w": 200, "h": 200},
@@ -229,18 +229,37 @@ def ws() -> Workspace:
     return w
 
 
+# 节点改名 / 重命名后，旧画布上的 defId 在这里跟着迁移 —— 不迁的话那些节点会
+# 显示成「未注册的脚本」，等于把用户画布打坏。加一条就是一次迁移；旧的**不要删**，
+# 用户手上可能还留着更早的工作区。
+DEF_ID_RENAMES = {
+    # 2026-10-14：Qwen 生图 / 编辑 → AI 生图 / 编辑（同一个节点并入 OpenAI 后端）
+    "qwen_image": "ai_image",
+}
+
+
 def _migrate(g: dict) -> dict:
-    """老画布兼容：补齐动态输入口的数量；已有连线指向的序号不会被凭空吃掉。"""
+    """老画布兼容：迁移改过名的 defId、补齐新增参数、补齐动态输入口数量。
+
+    已有连线指向的序号不会被凭空吃掉。
+    """
     for p in g.get("processes", []):
+        renamed = DEF_ID_RENAMES.get(p.get("defId"))
+        if renamed:
+            p["defId"] = renamed
+
         m = STATE["registry"].get(p.get("defId"))
         if not m:
             continue
 
-        # enum 参数的值若已不在选项里（manifest 改过，比如尺寸换了一批预设），
-        # 就地回落到默认值 —— 否则界面上的下拉会是一片空白
+        # 老节点缺的参数（manifest 后来新增的）补上默认值；enum 参数的值若已不在
+        # 选项里（manifest 改过，比如尺寸换了一批预设），就地回落到默认值 ——
+        # 否则界面上的下拉会是一片空白。参数按后端分组之后这两件事更要紧：
+        # 切到另一个后端时，那一整套参数必须已经在 params 里躺着。
         params = p.get("params")
         if isinstance(params, dict):
             for spec in m.get("params", []):
+                params.setdefault(spec["key"], spec.get("default"))
                 if spec.get("type") != "enum":
                     continue
                 allowed = [
@@ -382,7 +401,8 @@ def _auto_size_hint(out: dict, proc: dict, manifest: dict) -> dict | None:
     `out` 是 `_decorate` 里那份**已经补过宽高**的图，所以这里直接读
     `resources[*].width/height` 即可，不用再开一次图片文件。
     """
-    key = autosize.auto_key(manifest)
+    backend = registry_mod.backend_of(manifest, (proc.get("params") or {}).get("model"))
+    key = autosize.auto_key(manifest, backend)
     if key is None:
         return None  # 这个脚本没有「自动」语义
 
@@ -406,7 +426,7 @@ def _auto_size_hint(out: dict, proc: dict, manifest: dict) -> dict | None:
         ref, ref_port = r, port
         break
 
-    _value, info = autosize.pick(manifest, ref_dims)
+    _value, info = autosize.pick(manifest, ref_dims, backend)
     if info is None:
         return None
     if ref is not None and ref_port is not None:

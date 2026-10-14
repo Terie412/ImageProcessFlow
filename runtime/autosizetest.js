@@ -120,7 +120,7 @@ async function main() {
 
   // 参考图 720×1280 —— 输入本身就在下拉选项里
   const rid = await importImage(720, 1280, 60, 120)
-  const st = await post('/api/processes', { defId: 'qwen_image', x: 460, y: 120 })
+  const st = await post('/api/processes', { defId: 'ai_image', x: 460, y: 120 })
   const pid = st.graph.processes.at(-1).id
   await post('/api/edges', { from: rid, to: pid, port: 'image1' })
   const s0 = await api('/api/state')

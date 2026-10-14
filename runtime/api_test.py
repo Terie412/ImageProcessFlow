@@ -87,7 +87,7 @@ def main() -> int:
     print(f"   数据节点: {names}")
 
     step("2. 创建处理节点")
-    st = call("POST", "/api/processes", {"defId": "qwen_image", "x": 420, "y": 150})
+    st = call("POST", "/api/processes", {"defId": "ai_image", "x": 420, "y": 150})
     pid = st["graph"]["processes"][-1]["id"]
     print(f"   处理节点: {pid}")
 

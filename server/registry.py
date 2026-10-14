@@ -36,6 +36,31 @@ def default_params(manifest: dict) -> dict:
     return {p["key"]: p.get("default") for p in manifest.get("params", [])}
 
 
+# 「这个节点当前在跟哪个后端说话」由 model 参数决定 —— 见 backend_of 与 DESIGN.md §3.4。
+MODEL_PARAM_KEY = "model"
+
+
+def backend_of(manifest: dict | None, model: str | None) -> str | None:
+    """当前选中的 `model` 属于哪个后端（`"qwen"` / `"openai"`…）。
+
+    一个节点可以同时挂多个后端（`AI 生图 / 编辑` 就是 Qwen + GPT Image 两套），
+    参数上标 `"backend": "qwen"` 表示「只在选中该后端的模型时显示 / 生效」。
+    这个函数是**判定后端归属的唯一入口** —— `autosize` 和 `/api/state` 都走它，
+    否则「界面显示哪套尺寸参数」和「执行时读哪个 key」会各算各的。
+
+    判据是 model 参数每个 option 上的 `backend` 字段；没标 backend 的 option、
+    或者 model 值不在选项里（例如 manifest 刚改过），一律返回 None ——
+    调用方按「没有后端区分」处理，回退到不标 backend 的那份参数。
+    """
+    for p in (manifest or {}).get("params", []) or []:
+        if p.get("key") != MODEL_PARAM_KEY:
+            continue
+        for o in p.get("options", []) or []:
+            if isinstance(o, dict) and o.get("value") == model:
+                return o.get("backend")
+    return None
+
+
 def default_ports(manifest: dict) -> dict:
     """动态输入口的默认数量，例如 {"image": 1}"""
     return {

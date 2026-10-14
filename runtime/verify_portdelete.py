@@ -85,7 +85,7 @@ try:
     for i in range(3):
         st = upload(SEED, 60, 60 + i * 160)
         rids.append(st["graph"]["resources"][-1]["id"])
-    st = call("POST", "/api/processes", {"defId": "qwen_image", "x": 600, "y": 120})[1]
+    st = call("POST", "/api/processes", {"defId": "ai_image", "x": 600, "y": 120})[1]
     pid = st["graph"]["processes"][-1]["id"]
     st = call("PATCH", f"/api/processes/{pid}", {"ports": {"image": 3}})[1]
 

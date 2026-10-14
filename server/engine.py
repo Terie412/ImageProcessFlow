@@ -658,7 +658,9 @@ def execute(
     # 当成用户**显式选的**发给脚本 —— 脚本因此完全不需要知道「自动」这回事，
     # 它那边只有一条「有 size 就发、没有就不发」的老逻辑（见 autosize.py 的模块说明）。
     # 同一份解析也在 /api/state 里跑（main._auto_size_hint），两处口径必须一致。
-    auto_key = autosize.auto_key(manifest)
+    # 尺寸参数可以按后端分两套（size / size_gpt），所以先问 model 属于哪个后端。
+    backend = registry_mod.backend_of(manifest, params.get("model"))
+    auto_key = autosize.auto_key(manifest, backend)
     if auto_key and not str(params.get(auto_key) or "").strip():
         ref_dims: tuple[int, int] | None = None
         ref_label: str | None = None
@@ -671,7 +673,7 @@ def execute(
             if dims:
                 ref_dims, ref_label = dims, port.get("label") or port["key"]
                 break
-        value, info = autosize.resolve(manifest, params, ref_dims)
+        value, info = autosize.resolve(manifest, params, ref_dims, backend)
         if value:
             params[auto_key] = value
         if info:

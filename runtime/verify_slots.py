@@ -50,10 +50,10 @@ def part_a() -> None:
     print("=" * 62)
     print("[A] slot_origin / resource_height：落点按节点实际尺寸算")
     print("=" * 62)
-    manifest = {"id": "qwen_image", "size": {"defaultWidth": 600, "defaultHeight": 340}}
+    manifest = {"id": "ai_image", "size": {"defaultWidth": 600, "defaultHeight": 340}}
     settings = {"nodeMin": {"resource": {"w": 200, "h": 200}, "process": {"w": 560, "h": 280}}}
 
-    proc = {"id": "p1", "defId": "qwen_image", "x": 1000, "y": 200}
+    proc = {"id": "p1", "defId": "ai_image", "x": 1000, "y": 200}
     bx, by = engine_mod.slot_origin(proc, manifest, settings)
     print(f"   默认（无 w）：x={bx} y={by}")
     check("横向落点 = 节点 x + 宽度(600) + 留白", bx == 1000 + 600 + 64, str(bx))
@@ -80,7 +80,7 @@ def part_a() -> None:
 
     # 设置里把该类型的下限调大 → 也要让开
     s2 = json.loads(json.dumps(settings))
-    s2["nodeMin"]["process:qwen_image"] = {"w": 900, "h": 400}
+    s2["nodeMin"]["process:ai_image"] = {"w": 900, "h": 400}
     bx3, _ = engine_mod.slot_origin(proc, manifest, s2)
     print(f"   设置里该类型下限改成 900：x={bx3}")
     check("设置里的专属下限生效", bx3 == 1000 + 900 + 64, str(bx3))

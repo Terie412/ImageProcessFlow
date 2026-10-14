@@ -60,7 +60,7 @@ async function main() {
   console.log(`已切到一次性工作目录（原目录: ${origWs}）`)
 
   const rid = await makeDataNode(80, 200)
-  const st = await post('/api/processes', { defId: 'qwen_image', x: 520, y: 200 })
+  const st = await post('/api/processes', { defId: 'ai_image', x: 520, y: 200 })
   const pid = st.graph.processes[st.graph.processes.length - 1].id
   await post('/api/edges', { from: rid, to: pid, port: 'image1' })
   await fetch(`${BASE}/api/processes/${pid}`, {

@@ -66,7 +66,7 @@ orig = call("GET", "/api/state")["workspace"]
 
 print("===== 0. 尺寸选项 =====")
 st = call("GET", "/api/state")
-size_spec = next(p for p in st["manifests"]["qwen_image"]["params"] if p["key"] == "size")
+size_spec = next(p for p in st["manifests"]["ai_image"]["params"] if p["key"] == "size")
 vals = [(o if isinstance(o, str) else o["value"]) for o in size_spec["options"]]
 expected = ["", "720x1280", "1024x1024", "1280x720", "1024x1536", "1536x1024", "1536x1536"]
 print(f"  当前选项: {vals}")
@@ -83,7 +83,7 @@ call("POST", "/api/workspace", {"path": str(TMPWS)})
 try:
     st = upload(SEED, 80, 120)
     rid = st["graph"]["resources"][-1]["id"]
-    st = call("POST", "/api/processes", {"defId": "qwen_image", "x": 520, "y": 120})
+    st = call("POST", "/api/processes", {"defId": "ai_image", "x": 520, "y": 120})
     pid = st["graph"]["processes"][-1]["id"]
     call("POST", "/api/edges", {"from": rid, "to": pid, "port": "image1"})
 

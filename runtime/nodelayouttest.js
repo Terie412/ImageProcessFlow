@@ -93,7 +93,7 @@ async function main() {
   await post('/api/workspace', { path: TMPWS })
   const rid1 = await makeDataNode(60, 120)
   await makeDataNode(60, 1100)
-  const st = await post('/api/processes', { defId: 'qwen_image', x: 420, y: 120 })
+  const st = await post('/api/processes', { defId: 'ai_image', x: 420, y: 120 })
   const pid = st.graph.processes[st.graph.processes.length - 1].id
   await patch(`/api/processes/${pid}`, { ports: { image: 2 } })
   // 把两个节点都人为设成比最小值小
@@ -318,9 +318,9 @@ async function main() {
       && uiRows.some((l) => l.includes('裁剪')),
       uiRows.join(' / '))
 
-    const rr = await patch('/api/settings', { nodeMin: { 'process:qwen_image': { w: 700, h: 400 } } })
-    console.log(`   只设 process:qwen_image=700×400 → ${JSON.stringify(rr.body.settings.nodeMin)}`)
-    check('具体类型被写入', rr.body.settings.nodeMin['process:qwen_image']?.w === 700)
+    const rr = await patch('/api/settings', { nodeMin: { 'process:ai_image': { w: 700, h: 400 } } })
+    console.log(`   只设 process:ai_image=700×400 → ${JSON.stringify(rr.body.settings.nodeMin)}`)
+    check('具体类型被写入', rr.body.settings.nodeMin['process:ai_image']?.w === 700)
     check('通用 process 兜底不受影响', rr.body.settings.nodeMin.process.w === 560,
       `process.w=${rr.body.settings.nodeMin.process.w}`)
 
@@ -333,10 +333,10 @@ async function main() {
       Math.round(s3.w / z) >= 700 - 2 && Math.round(s3.h / z) >= 400 - 2,
       `${Math.round(s3.w / z)}×${Math.round(s3.h / z)}`)
 
-    const del = await patch('/api/settings', { nodeMin: { 'process:qwen_image': null } })
+    const del = await patch('/api/settings', { nodeMin: { 'process:ai_image': null } })
     console.log(`   传 null 删除后 → ${JSON.stringify(del.body.settings.nodeMin)}`)
     check('传 null 能删掉该项（回到通用兜底）',
-      !('process:qwen_image' in del.body.settings.nodeMin), JSON.stringify(del.body.settings.nodeMin))
+      !('process:ai_image' in del.body.settings.nodeMin), JSON.stringify(del.body.settings.nodeMin))
     check('基准项 resource / process 删不掉',
       !!del.body.settings.nodeMin.resource && !!del.body.settings.nodeMin.process)
   } finally {

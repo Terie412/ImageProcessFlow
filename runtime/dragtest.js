@@ -41,7 +41,7 @@ async function main() {
   const originalWs = (ORIG_WS = (await (await fetch(`${BASE}/api/state`)).json()).workspace)
   rmSync(TMPWS, { recursive: true, force: true })
   await post('/api/workspace', { path: TMPWS })
-  await post('/api/processes', { defId: 'qwen_image', x: 200, y: 150 })
+  await post('/api/processes', { defId: 'ai_image', x: 200, y: 150 })
   console.log(`已切到一次性工作目录（原目录: ${originalWs}）`)
 
   let target = null

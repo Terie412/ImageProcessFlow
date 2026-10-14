@@ -454,9 +454,18 @@ ImageProcessFlow/
 
 **已有的处理节点**：`Qwen 生图 / 编辑`（§3.4 下方）、`裁剪`（§3.8）、`调整分辨率`（§3.9）、`区域抹除`（§3.12）、`按透明度抹除`（§3.13）、`色彩平衡`（§3.14）；另有 `正方形扩展` / `单色替换` / `Alpha 缩放` 三个多输入几何节点（未单列小节，说明见 [`README.md`](README.md)）。引擎的通用能力（多输出、槽位重绑定、失败保留旧值）全部按 §2.2 实现，**加节点不需要改引擎** —— 只需写脚本 + manifest。
 
-**节点定义：Qwen 生图 / 编辑**
+**节点定义：AI 生图 / 编辑** `[已确认]`（2026-10-14 由「Qwen 生图 / 编辑」改造而来）
 
-脚本参考现有 QwenImageGen 封装（`qwen_image_gen.py`）改写为节点脚本：命令行参数换成 stdin JSON，`--output` 换成写入 `output_dir`。
+一个节点，**两套后端**：Qwen（阿里云百炼 DashScope）与 GPT Image（OpenAI 兼容端点）。
+模型选谁就走谁那套参数与请求路径；节点 id 是 `ai_image`，代码在 `scripts/ai_image/`。
+
+| | Qwen | GPT Image |
+| --- | --- | --- |
+| 端点 | 一个：`multimodal-generation/generation` | **两个**：无参考图 → `/images/generations`（JSON）；有参考图 → `/images/edits`（**multipart/form-data**） |
+| 参考图上限 | 10 | 16（节点按 10 声明，两边都够用） |
+| 返回 | 图片 URL，**还得再下载一次** | 只有 `b64_json`，**没有 URL**（`response_format` 该模型不支持） |
+| `size` 分隔符 | `720*1280`（星号） | `720x1280`（字母 x） |
+| 鉴权环境变量 | `DASHSCOPE_API_KEY` | `GPT-IMAGE-2-KEY` |
 
 *输入口*（**动态**，节点上用 −/＋ 增减数量）
 
@@ -464,24 +473,53 @@ ImageProcessFlow/
 | --- | --- |
 | `{ "key": "image", "dynamic": true, "count": 1, "min": 0, "max": 10 }` | 数量由节点实例的 `ports.image` 决定，端口为 `image1`、`image2`… |
 
-**全部为空 = 文生图**；有连线 = 图生图 / 编辑。脚本按端口顺序把非空输入依次传给 API —— `image1` 作为第 1 张，也就是提示词里写的「参考图1」（端口标签 = 提示词用词，见 §2.4）。
+**全部为空 = 文生图**；有连线 = 图生图 / 编辑。脚本按**端口序号**把所有非空输入依次传给 API —— `image1` 作为第 1 张，也就是提示词里写的「参考图1」（端口标签 = 提示词用词，见 §2.4）。
 
-*参数*
+*参数*（`backend` 列 = 该参数挂在哪个后端）
 
-| key | 类型 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `prompt` | text | — | 正向提示词或编辑指令（必填）。节点上以 `primary: true` 标记，占据主体位置 |
-| `model` | enum | `qwen-image-2.1-turbo` | 另可选 `qwen-image-2.1-pro` / `qwen-image-3.0` / `qwen-image-3.0-pro` |
-| `size` | enum | `""`（自动） | 可选 `720x1280` / `1024x1024` / `1280x720` / `1024x1536` / `1536x1024` / `1536x1536`；空 = **按参考图就近选一个预设**（见下） |
+| key | 类型 | 默认 | backend | 说明 |
+| --- | --- | --- | --- | --- |
+| `prompt` | text | — | 通用 | 正向提示词或编辑指令（必填）。节点上以 `primary: true` 标记，占据主体位置 |
+| `model` | enum | `qwen-image-2.1-turbo` | 通用 | 4 个 Qwen 模型 + `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` |
+| `size` | enum | `""`（自动） | `qwen` | 可选 `720x1280` / `1024x1024` / `1280x720` / `1024x1536` / `1536x1024` / `1536x1536` |
+| `size_gpt` | enum | `""`（自动） | `openai` | 可选 `1024x1024` / `1536x1024` / `1024x1536` / `2048x2048` / `2048x1152` / `1152x2048` / `3840x2160` / `2160x3840`（后 5 个是 2K / 4K） |
+| `n` | number | 1 | 通用 | 生成张数（每张计费）。上限取两者交集 **6**（GPT 支持到 10，Qwen 只到 6） |
+| `transparent` | bool | false | 通用 | 追加透明背景要求（**两个后端都靠提示词**，不是 API 参数） |
+| `prompt_extend` | bool | false | `qwen` | 提示词智能改写（编辑任务建议关闭） |
+| `watermark` | bool | false | `qwen` | 添加水印 |
+
+**参数按后端分组（`backend` 机制）** `[已确认]`（2026-10-14）
+
+manifest 的参数可以标一个 `"backend": "qwen" | "openai"`：**不标 = 各后端通用**（永远显示）；
+**标了 = 只在「当前选中的 model 属于该后端」时显示**。后端归属由 `model` 每个 option 上的 `backend` 字段决定。
+
+唯一入口是 `registry.backend_of(manifest, model)`，三处共用它，口径不会分叉：
+
+| 谁 | 拿它干什么 |
+| --- | --- |
+| 前端 `ProcessNode.jsx` | 过滤一遍 `specs` 再渲染 —— 过滤点只有一处，所有参数分组都从它派生 |
+| `main._auto_size_hint()` | 算 `/api/state` 的 `autoSize` 提示时读哪套尺寸参数 |
+| `engine.execute()` | 执行时把「自动」落成的尺寸塞进哪个 key |
+
+> **为什么尺寸分两套而不是共用**：两边合法取值不同（Qwen 有面积上下限，GPT 支持 2K/4K 与任意
+> `WIDTHxHEIGHT`），共用会让「就近挑预设」挑出另一个后端不认的值。所以 `size` 与 `size_gpt` **各有选项表、
+> 各自声明 `autoFrom`**，`autosize.auto_key(manifest, backend)` 按后端返回对应的 key
+> （`resolve()` / `pick()` 因此都多了一个 `backend` 参数）。
+
+> **切模型不会丢参数值**：`registry.default_params()` 建节点时把 manifest 里**所有** key 写进 `params`，
+> `_migrate()` 给老节点补上缺失的 key。两套值一直躺在 `graph.json` 里，UI 只是"不显示"。
+
+**老工作区的 defId 迁移** `[已确认]`（2026-10-14）
+
+`main.DEF_ID_RENAMES` 把 `qwen_image` 映射到 `ai_image`，`_migrate()` 在加载每张画布时执行 ——
+不迁的话旧节点会显示成「未注册的脚本」。**映射表只增不删**，用户手上可能还留着更早的工作区。
+`DEFAULT_SETTINGS.nodeMin` 与用户 `settings.json` 里的 `process:qwen_image` 也已改成 `process:ai_image`。
 
 > **尺寸的分隔符坑** `[已确认]`：DashScope 要求 `720*1280` 这种**星号**写法，写成 `720x1280` 会被拒：
-> `{"code":"InvalidParameter","message":"Expected format: '<width>*<height>'"}`。
-> manifest 里仍写成人类可读的 `x`，**脚本发送前统一归一化**（`x` / `X` / `×` / `*` 都能吃）。
-> 面积需落在 `512x512`(262144) ~ `2560x2560`(6553600) 之间，**图生图上限更低（2048x2048）**，所以预设值都控制在这个范围内。
-| `n` | number | 1 | 生成张数（每张计费） |
-| `transparent` | bool | false | 追加透明背景要求 |
-| `prompt_extend` | bool | false | 提示词智能改写（编辑任务建议关闭） |
-| `watermark` | bool | false | 添加水印 |
+> `{"code":"InvalidParameter","message":"Expected format: '<width>*<height>'"}`；
+> OpenAI 那边正好相反，只认字母 `x`。manifest 里统一写成人类可读的 `x`，
+> **脚本按后端各自归一化**（`x` / `X` / `×` / `*` 都能吃）。
+> Qwen 侧面积需落在 `512x512`(262144) ~ `2560x2560`(6553600) 之间，**图生图上限更低（2048x2048）**，所以预设值都控制在这个范围内。
 
 **尺寸「自动」的语义** `[已确认]`（2026-10-12）
 

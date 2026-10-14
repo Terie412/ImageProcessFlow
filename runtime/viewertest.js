@@ -61,7 +61,7 @@ async function main() {
   const st = await (await fetch(`${BASE}/api/resources/import`, { method: 'POST', body: fd })).json()
   const rid = st.graph.resources[st.graph.resources.length - 1].id
   const name = st.graph.resources[st.graph.resources.length - 1].name
-  const proc = await post('/api/processes', { defId: 'qwen_image', x: 900, y: 600 })
+  const proc = await post('/api/processes', { defId: 'ai_image', x: 900, y: 600 })
   const pid = proc.graph.processes[proc.graph.processes.length - 1].id
   console.log(`已建测试画布：数据节点 ${name}（3000×2000）+ 一个处理节点`)
 

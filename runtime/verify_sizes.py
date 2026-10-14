@@ -91,7 +91,7 @@ def part_a() -> None:
         "process:alpha_erase":   ((200, 200), (200, 200)),
         "process:color_balance": ((200, 200), (200, 200)),
         "process:crop":          ((220, 200), (220, 200)),
-        "process:qwen_image":    ((560, 300), (200, 200)),
+        "process:ai_image":    ((560, 300), (200, 200)),
         "process:recolor":       ((200, 200), (200, 200)),
         "process:region_erase":  ((200, 200), (200, 200)),
         "process:resize":        ((200, 200), (200, 200)),
@@ -106,7 +106,7 @@ def part_a() -> None:
         check(f"{key}：初始 {init[0]}×{init[1]} / 最小 {mn[0]}×{mn[1]}",
               g[:2] == init and g[2:] == mn, str(got))
 
-    q = t["process:qwen_image"]
+    q = t["process:ai_image"]
     print(f"   Qwen 生图：{q}")
     check("处理节点初始尺寸取 manifest 的 size（560×300）",
           (q["w"], q["h"]) == (560, 300), str((q["w"], q["h"])))
@@ -143,19 +143,19 @@ def part_a() -> None:
         "nodeMin": {"resource": {"w": 200, "h": 200}, "process": {"w": 560, "h": 280}},
     }
     check("默认设置里的 nodeSize.process 只是兜底，不盖 manifest",
-          ns.size_of({"defId": "qwen_image"}, kind="process", manifest=reg["qwen_image"],
+          ns.size_of({"defId": "ai_image"}, kind="process", manifest=reg["ai_image"],
                      settings=defaults_like) == (560, 300),
-          str(ns.size_of({"defId": "qwen_image"}, kind="process",
-                         manifest=reg["qwen_image"], settings=defaults_like)))
+          str(ns.size_of({"defId": "ai_image"}, kind="process",
+                         manifest=reg["ai_image"], settings=defaults_like)))
     check("没声明 size 的脚本才轮到 nodeSize.process",
           ns.size_of({"defId": "third_party"}, kind="process", manifest={"id": "third_party"},
                      settings=defaults_like) == (600, 340))
     check("针对该类型的 nodeSize 设置优先级最高",
-          ns.size_of({"defId": "qwen_image"}, kind="process", manifest=reg["qwen_image"],
-                     settings={"nodeSize": {"process:qwen_image": {"w": 800, "h": 500}}})
-          == (800, 500), str(ns.size_of({"defId": "qwen_image"}, kind="process",
-                                        manifest=reg["qwen_image"],
-                                        settings={"nodeSize": {"process:qwen_image":
+          ns.size_of({"defId": "ai_image"}, kind="process", manifest=reg["ai_image"],
+                     settings={"nodeSize": {"process:ai_image": {"w": 800, "h": 500}}})
+          == (800, 500), str(ns.size_of({"defId": "ai_image"}, kind="process",
+                                        manifest=reg["ai_image"],
+                                        settings={"nodeSize": {"process:ai_image":
                                                                {"w": 800, "h": 500}}})))
     check("未注册 / 没声明 size 的 defId → nodeSize.process → 常量",
           ns.size_of({"defId": "nope"}, kind="process", manifest=None, settings=st) == (600, 340),
@@ -181,8 +181,8 @@ def part_a() -> None:
           engine_mod.resource_height({}, s) == 200, str(engine_mod.resource_height({}, s)))
 
     # 横向落点用的宽度也得同口径
-    manifest = {"id": "qwen_image", "size": {"defaultWidth": 600, "defaultHeight": 340}}
-    proc = {"id": "p1", "defId": "qwen_image", "x": 1000, "y": 200}
+    manifest = {"id": "ai_image", "size": {"defaultWidth": 600, "defaultHeight": 340}}
+    proc = {"id": "p1", "defId": "ai_image", "x": 1000, "y": 200}
     bx, _ = engine_mod.slot_origin(proc, manifest, s)
     pw = ns.size_of(proc, kind="process", manifest=manifest, settings=s)[0]
     check("slot_origin 横向 = x + 宽度 + 64（宽度同口径）",
@@ -205,7 +205,7 @@ TMP_CANVAS = {
          "x": 900, "y": 0},                                                            # 没存过
     ],
     "processes": [
-        {"id": "p1", "defId": "qwen_image", "x": 400, "y": 0, "ports": {"image": 1}, "params": {}},
+        {"id": "p1", "defId": "ai_image", "x": 400, "y": 0, "ports": {"image": 1}, "params": {}},
         {"id": "p2", "defId": "crop", "x": 400, "y": 300, "params": {}, "w": 350, "h": 250},
         {"id": "p3", "defId": "resize", "x": 400, "y": 600, "ports": {"image": 1}, "params": {}},
     ],
@@ -255,7 +255,7 @@ def part_b() -> None:
     PIN_MIN = {
         "resource": {"w": 200, "h": 200},
         "process": {"w": 560, "h": 280},
-        "process:qwen_image": {"w": 200, "h": 200},
+        "process:ai_image": {"w": 200, "h": 200},
         "process:crop": {"w": 220, "h": 200},
         "process:resize": {"w": 200, "h": 200},
     }

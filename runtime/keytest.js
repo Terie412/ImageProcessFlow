@@ -40,7 +40,7 @@ const patch = (path, body) =>
   }).then((r) => r.json())
 
 async function makeProcess(x, y) {
-  const r = await post('/api/processes', { defId: 'qwen_image', x, y })
+  const r = await post('/api/processes', { defId: 'ai_image', x, y })
   return r.graph.processes[r.graph.processes.length - 1].id
 }
 

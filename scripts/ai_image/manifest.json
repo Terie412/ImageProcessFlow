@@ -1,0 +1,119 @@
+{
+  "id": "ai_image",
+  "name": "AI 生图 / 编辑",
+  "entry": "ai_image.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "参考图",
+      "count": 1,
+      "min": 0,
+      "max": 10
+    }
+  ],
+  "params": [
+    {
+      "key": "prompt",
+      "type": "text",
+      "default": "",
+      "required": true,
+      "primary": true,
+      "label": "提示词",
+      "placeholder": "例如：只保留参考图1中的人物"
+    },
+    {
+      "key": "model",
+      "type": "enum",
+      "default": "qwen-image-2.1-turbo",
+      "label": "模型",
+      "width": "grow",
+      "options": [
+        { "value": "qwen-image-2.1-turbo", "label": "Qwen 2.1 Turbo", "backend": "qwen" },
+        { "value": "qwen-image-2.1-pro", "label": "Qwen 2.1 Pro", "backend": "qwen" },
+        { "value": "qwen-image-3.0", "label": "Qwen 3.0", "backend": "qwen" },
+        { "value": "qwen-image-3.0-pro", "label": "Qwen 3.0 Pro", "backend": "qwen" },
+        { "value": "gpt-image-2.5-flare", "label": "GPT 2.5 Flare", "backend": "openai" },
+        { "value": "gpt-image-2.5-sunburst", "label": "GPT 2.5 Sunburst", "backend": "openai" }
+      ]
+    },
+    {
+      "key": "size",
+      "type": "enum",
+      "default": "",
+      "label": "尺寸",
+      "autoFrom": "input",
+      "backend": "qwen",
+      "options": [
+        { "value": "", "label": "自动" },
+        { "value": "720x1280", "label": "720×1280" },
+        { "value": "1024x1024", "label": "1024×1024" },
+        { "value": "1280x720", "label": "1280×720" },
+        { "value": "1024x1536", "label": "1024×1536" },
+        { "value": "1536x1024", "label": "1536×1024" },
+        { "value": "1536x1536", "label": "1536×1536" }
+      ]
+    },
+    {
+      "key": "size_gpt",
+      "type": "enum",
+      "default": "",
+      "label": "尺寸",
+      "autoFrom": "input",
+      "backend": "openai",
+      "options": [
+        { "value": "", "label": "自动" },
+        { "value": "1024x1024", "label": "1024×1024" },
+        { "value": "1536x1024", "label": "1536×1024" },
+        { "value": "1024x1536", "label": "1024×1536" },
+        { "value": "2048x2048", "label": "2048×2048 (1:1 · 2K)" },
+        { "value": "2048x1152", "label": "2048×1152 (16:9 · 2K)" },
+        { "value": "1152x2048", "label": "1152×2048 (9:16 · 2K)" },
+        { "value": "3840x2160", "label": "3840×2160 (16:9 · 4K)" },
+        { "value": "2160x3840", "label": "2160×3840 (9:16 · 4K)" }
+      ]
+    },
+    {
+      "key": "n",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 6,
+      "label": "张数",
+      "width": "narrow"
+    },
+    {
+      "key": "transparent",
+      "type": "bool",
+      "default": false,
+      "label": "透明底"
+    },
+    {
+      "key": "prompt_extend",
+      "type": "bool",
+      "default": false,
+      "label": "改写",
+      "backend": "qwen"
+    },
+    {
+      "key": "watermark",
+      "type": "bool",
+      "default": false,
+      "label": "水印",
+      "backend": "qwen"
+    }
+  ],
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
+  "_note": "参数上的 backend 决定「选中哪个后端的模型时显示这套参数」，见 DESIGN.md §3.4。最小尺寸不在这里声明 —— 它是用户级偏好，在设置的 nodeMin 里调。",
+  "size": {
+    "defaultWidth": 560,
+    "defaultHeight": 300
+  }
+}

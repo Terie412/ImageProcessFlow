@@ -130,12 +130,23 @@ def dims_of_path(path) -> tuple[int, int] | None:
 # --------------------------------------------------------------------------
 # 与 manifest 的对接
 # --------------------------------------------------------------------------
-def auto_key(manifest: dict | None) -> str | None:
-    """这个 manifest 里哪个参数声明了「自动」语义。没有返回 None。"""
+def auto_key(manifest: dict | None, backend: str | None = None) -> str | None:
+    """这个 manifest 里哪个参数声明了「自动」语义。没有返回 None。
+
+    一个节点可以有**多套**尺寸参数（`AI 生图 / 编辑` 的 `size` 与 `size_gpt`），
+    各自声明 `autoFrom`。`backend` 给了就优先返回**同后端**的那一个，
+    所以「选中 gpt 模型时读 size_gpt、选中 qwen 模型时读 size」这件事只有这里说了算。
+    找不到同后端的，回退到第一个（不标 backend 的参数等于各后端通用）。
+    """
+    fallback: str | None = None
     for p in (manifest or {}).get("params", []) or []:
-        if p.get("autoFrom") == AUTO_FROM_INPUT:
+        if p.get("autoFrom") != AUTO_FROM_INPUT:
+            continue
+        if backend is not None and p.get("backend") == backend:
             return p.get("key")
-    return None
+        if fallback is None:
+            fallback = p.get("key")
+    return fallback
 
 
 def options_of(manifest: dict | None, key: str) -> list[str]:
@@ -156,6 +167,7 @@ def resolve(
     manifest: dict | None,
     params: dict | None,
     ref_dims: tuple[int, int] | None,
+    backend: str | None = None,
 ) -> tuple[str | None, dict | None]:
     """**执行时**用：算出该发给模型的尺寸。
 
@@ -172,7 +184,7 @@ def resolve(
     | 自动 + 有参考图 | 命中的选项 | `{"source": "input", ...}` |
     | 自动 + 没有参考图 | `None`（交回模型） | `{"source": "model"}` |
     """
-    key = auto_key(manifest)
+    key = auto_key(manifest, backend)
     if key is None:
         return None, None
 
@@ -180,12 +192,13 @@ def resolve(
     if chosen:
         return chosen, None
 
-    return pick(manifest, ref_dims)
+    return pick(manifest, ref_dims, backend)
 
 
 def pick(
     manifest: dict | None,
     ref_dims: tuple[int, int] | None,
+    backend: str | None = None,
 ) -> tuple[str | None, dict | None]:
     """「自动」**会**落到哪个预设 —— **与用户当前选了什么无关**。
 
@@ -193,7 +206,7 @@ def pick(
     显不显示提示是**前端**的事（用户切回「自动」是纯本地操作，不该再等一次
     `/api/state`），服务端只管算。执行时该不该用这个值由 `resolve()` 决定。
     """
-    key = auto_key(manifest)
+    key = auto_key(manifest, backend)
     if key is None:
         return None, None
 

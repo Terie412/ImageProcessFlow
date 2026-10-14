@@ -80,7 +80,17 @@ export default function ProcessNode({ id, data, selected }) {
     onResizeStart,
   } = data
 
-  const specs = manifest?.params || []
+  /* 参数可以按后端分组：带 `backend` 的只在「当前选中的 model 属于该后端」时出现
+     —— `AI 生图 / 编辑` 一个节点底下挂着 Qwen 与 GPT Image 两套参数，见 DESIGN.md §3.4。
+     判定口径必须和服务端 registry.backend_of 一致：读 model 每个 option 上的 backend 字段。
+     没标 backend 的参数 = 各后端通用，永远显示。
+     参数值本身不在这里过滤 —— 另一套的值一直躺在 params 里（服务端建节点时会把
+     manifest 里所有 key 都初始化），切回来还在，不会丢。 */
+  const allSpecs = manifest?.params || []
+  const curBackend = (allSpecs.find((s) => s.key === 'model')?.options || [])
+    .map((o) => (typeof o === 'string' ? { value: o } : o))
+    .find((o) => o.value === params.model)?.backend
+  const specs = allSpecs.filter((s) => !s.backend || s.backend === curBackend)
   const primary = specs.find((s) => s.primary) || specs.find((s) => s.type === 'text')
   const others = specs.filter((s) => s !== primary)
   const primaryText = primary && primary.type === 'text' ? params[primary.key] ?? '' : ''
