@@ -42,11 +42,16 @@
       "label": "保持亮度"
     }
   ],
-  "outputs": [{ "key": "image", "type": "image", "multi": true }],
-
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
   "_note": "把整张图的色调沿两条色偏轴整体平移：正数往黄/绿推、负数往蓝/品红推，画面内容与明暗层次都不动。两个值都是 0 时原样复制（不重新编码）。多输入逐张独立处理，几张进几张出。",
   "size": {
-    "defaultWidth": 560,
-    "defaultHeight": 280
+    "defaultWidth": 200,
+    "defaultHeight": 200
   }
 }

@@ -64,7 +64,7 @@ async function main() {
   // ---------- 1. 后端设置 ----------
   console.log('\n[1] nodeMin 设置（后端）')
   console.log(`   默认值: ${JSON.stringify(st0.settings.nodeMin)}`)
-  check('默认值是 200×180 / 560×280',
+  check('数据节点宽 200 / 处理节点兜底高 280',
     st0.settings.nodeMin?.resource?.w === 200 && st0.settings.nodeMin?.process?.h === 280,
     JSON.stringify(st0.settings.nodeMin))
 

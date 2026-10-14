@@ -30,10 +30,22 @@
       "label": "模型",
       "width": "grow",
       "options": [
-        { "value": "qwen-image-2.1-turbo", "label": "qwen-image-2.1-turbo" },
-        { "value": "qwen-image-2.1-pro", "label": "qwen-image-2.1-pro" },
-        { "value": "qwen-image-3.0", "label": "qwen-image-3.0" },
-        { "value": "qwen-image-3.0-pro", "label": "qwen-image-3.0-pro" }
+        {
+          "value": "qwen-image-2.1-turbo",
+          "label": "qwen-image-2.1-turbo"
+        },
+        {
+          "value": "qwen-image-2.1-pro",
+          "label": "qwen-image-2.1-pro"
+        },
+        {
+          "value": "qwen-image-3.0",
+          "label": "qwen-image-3.0"
+        },
+        {
+          "value": "qwen-image-3.0-pro",
+          "label": "qwen-image-3.0-pro"
+        }
       ]
     },
     {
@@ -43,13 +55,34 @@
       "label": "尺寸",
       "autoFrom": "input",
       "options": [
-        { "value": "", "label": "自动" },
-        { "value": "720x1280", "label": "720×1280" },
-        { "value": "1024x1024", "label": "1024×1024" },
-        { "value": "1280x720", "label": "1280×720" },
-        { "value": "1024x1536", "label": "1024×1536" },
-        { "value": "1536x1024", "label": "1536×1024" },
-        { "value": "1536x1536", "label": "1536×1536" }
+        {
+          "value": "",
+          "label": "自动"
+        },
+        {
+          "value": "720x1280",
+          "label": "720×1280"
+        },
+        {
+          "value": "1024x1024",
+          "label": "1024×1024"
+        },
+        {
+          "value": "1280x720",
+          "label": "1280×720"
+        },
+        {
+          "value": "1024x1536",
+          "label": "1024×1536"
+        },
+        {
+          "value": "1536x1024",
+          "label": "1536×1024"
+        },
+        {
+          "value": "1536x1536",
+          "label": "1536×1536"
+        }
       ]
     },
     {
@@ -61,11 +94,32 @@
       "label": "张数",
       "width": "narrow"
     },
-    { "key": "transparent", "type": "bool", "default": false, "label": "透明底" },
-    { "key": "prompt_extend", "type": "bool", "default": false, "label": "改写" },
-    { "key": "watermark", "type": "bool", "default": false, "label": "水印" }
+    {
+      "key": "transparent",
+      "type": "bool",
+      "default": false,
+      "label": "透明底"
+    },
+    {
+      "key": "prompt_extend",
+      "type": "bool",
+      "default": false,
+      "label": "改写"
+    },
+    {
+      "key": "watermark",
+      "type": "bool",
+      "default": false,
+      "label": "水印"
+    }
   ],
-  "outputs": [{ "key": "image", "type": "image", "multi": true }],
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
   "_note": "最小尺寸不在这里声明 —— 它是用户级偏好，在界面的设置里调（settings.json 的 nodeMin）",
   "size": {
     "defaultWidth": 560,

@@ -23,11 +23,16 @@
       "width": "narrow"
     }
   ],
-  "outputs": [{ "key": "image", "type": "image", "multi": true }],
-
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
   "_note": "把图里所有像素的 RGB 统一替换成指定颜色，Alpha 原样保留（出来是目标色的剪影）。多输入逐张独立处理，几张进几张出。带 Alpha 的输出一律 PNG，不带 Alpha 的跟随原图格式。",
   "size": {
-    "defaultWidth": 220,
-    "defaultHeight": 210
+    "defaultWidth": 200,
+    "defaultHeight": 200
   }
 }

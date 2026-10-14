@@ -25,11 +25,16 @@
       "label": "Alpha"
     }
   ],
-  "outputs": [{ "key": "image", "type": "image", "multi": true }],
-
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
   "_note": "把每个像素的透明通道乘以 Alpha 系数（0~1），RGB 原样不动。没透明通道的图先转成 PNG 再乘 —— 输出因此**一律是 PNG**。多输入逐张独立处理，几张进几张出。",
   "size": {
     "defaultWidth": 220,
-    "defaultHeight": 210
+    "defaultHeight": 200
   }
 }

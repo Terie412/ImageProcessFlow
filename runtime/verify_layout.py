@@ -51,7 +51,7 @@ def req(method: str, path: str, body=None, timeout: int = 120):
         return json.loads(resp.read().decode())
 
 
-# 宽松的下限：让合成图里写死的 w/h 原样生效（默认下限 560×280 / 200×180 会顶掉小尺寸）
+# 宽松的下限：让合成图里写死的 w/h 原样生效（默认下限 560×280 / 200×200 会顶掉小尺寸）
 S_MIN = {"nodeMin": {"resource": {"w": 80, "h": 80}, "process": {"w": 80, "h": 80}}}
 S_SNAP = dict(S_MIN, snapToGrid=True, gridSize=5)
 REG: dict = {}
@@ -299,7 +299,7 @@ def case_translate() -> None:
 
 
 def case_size_source() -> None:
-    print("\n[6] 尺寸走统一口径：数据节点没存过高 = 220（不是旧的服务端常量 280）")
+    print("\n[6] 尺寸走统一口径：数据节点没存过高 = 200（不是旧的服务端常量 280）")
     graph = {
         "resources": [
             res("i1", 0, 0, w=200, h=100),
@@ -312,8 +312,8 @@ def case_size_source() -> None:
     engine_mod.format_all(graph, REG, {})   # 默认设置（无吸附）
     dy = node_of(graph, "b")["y"] - node_of(graph, "a")["y"]
     print(f"   两个输出的 y 差：{dy}")
-    check("间距 = 220 + 20（220 就是屏幕上的实际高度）",
-          abs(dy - (220 + engine_mod.ROW_GAP_Y)) < 1e-9, str(dy))
+    check("间距 = 200 + 20（200 就是屏幕上的实际高度）",
+          abs(dy - (200 + engine_mod.ROW_GAP_Y)) < 1e-9, str(dy))
     check("处理节点按默认下限 560 宽算",
           ns.size_of(node_of(graph, "k1"), kind="process", settings={})[0] == 560
           and node_of(graph, "k1")["x"] == node_of(graph, "i1")["x"] + 200 + engine_mod.COL_GAP_X,

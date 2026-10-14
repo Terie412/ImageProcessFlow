@@ -63,9 +63,48 @@ def part_a() -> None:
 
     r0 = t["resource"]
     print(f"   数据节点：{r0}")
-    check("数据节点初始尺寸 = 200×220（**和屏幕上的渲染口径一致**）",
-          (r0["w"], r0["h"]) == (200, 220), str((r0["w"], r0["h"])))
-    check("数据节点最小尺寸 = 200×180", (r0["minW"], r0["minH"]) == (200, 180), str(r0))
+    check("数据节点初始尺寸 = 200×200（**和屏幕上的渲染口径一致**）",
+          (r0["w"], r0["h"]) == (200, 200), str((r0["w"], r0["h"])))
+    check("数据节点最小尺寸 = 200×200", (r0["minW"], r0["minH"]) == (200, 200), str(r0))
+
+    # 兜底常量与 DEFAULT_SETTINGS 必须同值 —— 不同值就是「服务端按一个高排版、
+    # 前端按另一个高渲染」那类假缝的温床（§3.5.1 踩过）
+    import main as main_mod  # noqa: PLC0415
+    ds = main_mod.DEFAULT_SETTINGS
+    for kind in ("resource", "process"):
+        want = (ds["nodeSize"][kind]["w"], ds["nodeSize"][kind]["h"])
+        check(f"SIZE_FALLBACK[{kind}] == DEFAULT_SETTINGS.nodeSize[{kind}]",
+              (ns.SIZE_FALLBACK[kind]["w"], ns.SIZE_FALLBACK[kind]["h"]) == want,
+              f"{ns.SIZE_FALLBACK[kind]} vs {want}")
+        want_min = (ds["nodeMin"][kind]["w"], ds["nodeMin"][kind]["h"])
+        check(f"MIN_FALLBACK[{kind}] == DEFAULT_SETTINGS.nodeMin[{kind}]",
+              (ns.MIN_FALLBACK[kind]["w"], ns.MIN_FALLBACK[kind]["h"]) == want_min,
+              f"{ns.MIN_FALLBACK[kind]} vs {want_min}")
+
+    # 默认值解析出来的那张表 —— 就是界面 ⚙ 里「节点尺寸」一栏会显示的东西。
+    # 这些数是 2026-10-14 在界面上一行一行定下来、再固化进代码的，改它们要连着改这里。
+    print("\n[默认值] DEFAULT_SETTINGS 解析出的尺寸表")
+    t_def = ns.resolve_types(reg, json.loads(json.dumps(ds)))
+    WANT_DEFAULT = {
+        "resource":              ((200, 200), (200, 200)),
+        "process:alpha":         ((220, 200), (200, 200)),
+        "process:alpha_erase":   ((200, 200), (200, 200)),
+        "process:color_balance": ((200, 200), (200, 200)),
+        "process:crop":          ((220, 200), (220, 200)),
+        "process:qwen_image":    ((560, 300), (200, 200)),
+        "process:recolor":       ((200, 200), (200, 200)),
+        "process:region_erase":  ((200, 200), (200, 200)),
+        "process:resize":        ((200, 200), (200, 200)),
+        "process:square_pad":    ((200, 200), (200, 200)),
+        # 兜底那一行：只给"没声明 size 又没有自己那一行"的类型用
+        "process":               ((600, 340), (560, 280)),
+    }
+    for key, (init, mn) in WANT_DEFAULT.items():
+        got = t_def.get(key) or {}
+        g = (int(got.get("w", 0)), int(got.get("h", 0)),
+             int(got.get("minW", 0)), int(got.get("minH", 0)))
+        check(f"{key}：初始 {init[0]}×{init[1]} / 最小 {mn[0]}×{mn[1]}",
+              g[:2] == init and g[2:] == mn, str(got))
 
     q = t["process:qwen_image"]
     print(f"   Qwen 生图：{q}")
@@ -74,17 +113,18 @@ def part_a() -> None:
 
     # 最终尺寸 = max(最小尺寸, 存的 w/h ?? 初始尺寸)
     print("\n[最终尺寸] max(最小尺寸, 存的 ?? 初始)")
-    check("没存过 → 初始尺寸", ns.size_of({}, kind="resource", settings=clean) == (200, 220))
-    check("存了 h=180 → 用 180", ns.size_of({"h": 180}, kind="resource", settings=clean) == (200, 180))
-    check("存了 h=150 但下限 180 → 兜到 180",
-          ns.size_of({"h": 150}, kind="resource", settings=clean) == (200, 180))
+    check("没存过 → 初始尺寸", ns.size_of({}, kind="resource", settings=clean) == (200, 200))
+    check("存了 h=260（高于下限）→ 用 260",
+          ns.size_of({"h": 260}, kind="resource", settings=clean) == (200, 260))
+    check("存了 h=150 但下限 200 → 兜到 200",
+          ns.size_of({"h": 150}, kind="resource", settings=clean) == (200, 200))
     check("存了 h=444 → 用 444", ns.size_of({"h": 444}, kind="resource", settings=clean) == (200, 444))
 
     # 设置的两张表都生效，且形状一致
     print("\n[设置] nodeSize（初始）/ nodeMin（最小）都按具体类型生效")
     st = {
         "nodeSize": {"resource": {"w": 333, "h": 444}, "process:crop": {"w": 777, "h": 888}},
-        "nodeMin": {"resource": {"w": 200, "h": 180}, "process": {"w": 560, "h": 280}},
+        "nodeMin": {"resource": {"w": 200, "h": 200}, "process": {"w": 560, "h": 280}},
     }
     check("nodeSize 覆盖数据节点初始尺寸",
           ns.size_of({}, kind="resource", settings=st) == (333, 444),
@@ -99,8 +139,8 @@ def part_a() -> None:
     # 「通用兜底」不能盖掉脚本自己声明的尺寸（实测踩过：Qwen 被盖成 600×340）
     print("\n[优先级] nodeSize[类型] > manifest.size > nodeSize.process > 常量")
     defaults_like = {
-        "nodeSize": {"resource": {"w": 200, "h": 220}, "process": {"w": 600, "h": 340}},
-        "nodeMin": {"resource": {"w": 200, "h": 180}, "process": {"w": 560, "h": 280}},
+        "nodeSize": {"resource": {"w": 200, "h": 200}, "process": {"w": 600, "h": 340}},
+        "nodeMin": {"resource": {"w": 200, "h": 200}, "process": {"w": 560, "h": 280}},
     }
     check("默认设置里的 nodeSize.process 只是兜底，不盖 manifest",
           ns.size_of({"defId": "qwen_image"}, kind="process", manifest=reg["qwen_image"],
@@ -132,13 +172,13 @@ def part_a() -> None:
 
     # 最关键的一条：服务端排输出槽位的口径，必须就是前端渲染的口径
     print("\n[同口径] engine 排槽位用的高度 == 前端渲染用的高度")
-    s = {"nodeMin": {"resource": {"w": 200, "h": 180}, "process": {"w": 560, "h": 280}}}
-    for r in ({}, {"h": 180}, {"h": 150}, {"h": 364}):
+    s = {"nodeMin": {"resource": {"w": 200, "h": 200}, "process": {"w": 560, "h": 280}}}
+    for r in ({}, {"h": 200}, {"h": 150}, {"h": 364}):
         got = engine_mod.resource_height(r, s)
         want = ns.size_of(r, kind="resource", settings=s)[1]
         check(f"resource_height({r}) == size_of().h", got == want, f"{got} vs {want}")
-    check("没存过尺寸 → 220（不再是服务端那个 280）",
-          engine_mod.resource_height({}, s) == 220, str(engine_mod.resource_height({}, s)))
+    check("没存过尺寸 → 200（不再是服务端那个 280）",
+          engine_mod.resource_height({}, s) == 200, str(engine_mod.resource_height({}, s)))
 
     # 横向落点用的宽度也得同口径
     manifest = {"id": "qwen_image", "size": {"defaultWidth": 600, "defaultHeight": 340}}
@@ -159,7 +199,7 @@ TMP_CANVAS = {
     "viewport": None,
     "resources": [
         {"id": "r1", "name": "A", "kind": "input", "x": 0, "y": 0},                    # 没存过
-        {"id": "r2", "name": "B", "kind": "input", "x": 0, "y": 300, "w": 200, "h": 180},
+        {"id": "r2", "name": "B", "kind": "input", "x": 0, "y": 300, "w": 200, "h": 260},
         {"id": "r3", "name": "C", "kind": "input", "x": 0, "y": 600, "w": 200, "h": 150},  # 低于下限
         {"id": "r4", "name": "D", "kind": "output", "producer": "p1", "index": 0,
          "x": 900, "y": 0},                                                            # 没存过
@@ -205,14 +245,20 @@ def part_b() -> None:
 
     # 切换到一次性工作目录跑，跑完恢复（和 verify_slots 一个套路）
     orig_ws = st.get("workspace")
-    # 下面的期望值（数据节点 200×180、处理节点 560×280）写的是 nodespec 的 MIN_FALLBACK。
-    # 但**下限是用户级设置**（settings.json 的 nodeMin），机器上那份可能被改过，
-    # 于是这个测试会跟着别人机器上的设置变红。所以先把下限按期望钉住，跑完再还回去。
+    # 下面的期望值按**代码里的默认值**算。但初始尺寸与下限都是用户级设置
+    # （settings.json 的 nodeSize / nodeMin），机器上那份可能被改过，
+    # 于是这个测试会跟着别人机器上的设置变红。所以把用到的这几项都钉住，
+    # 跑完再**原样**还回去（原本没有的那几项要删掉，见下面的 finally）。
     #
     # 还原必须用**原始 dict**，不能拿 `spec`（解析后的并集）去还：spec["resource"] 里
-    # 的 h 是**初始**高（220），用它 PATCH nodeMin 会把「最小」悄悄写成 220 —— 这正是
-    # settings.json 里 minH 从 180 变成 220 的由来（踩过）。
-    PIN_MIN = {"resource": {"w": 200, "h": 180}, "process": {"w": 560, "h": 280}}
+    # 的 h 是**初始**高，用它 PATCH nodeMin 会把「最小」悄悄写成初始值（踩过）。
+    PIN_MIN = {
+        "resource": {"w": 200, "h": 200},
+        "process": {"w": 560, "h": 280},
+        "process:qwen_image": {"w": 200, "h": 200},
+        "process:crop": {"w": 220, "h": 200},
+        "process:resize": {"w": 200, "h": 200},
+    }
     orig_min = dict((st.get("settings") or {}).get("nodeMin") or {})
     orig_size = dict((st.get("settings") or {}).get("nodeSize") or {})
     TMPWS.mkdir(parents=True, exist_ok=True)
@@ -232,13 +278,13 @@ def part_b() -> None:
         got.update({p["id"]: (p["w"], p["h"]) for p in st["graph"]["processes"]})
         print(f"   服务端算出的尺寸：{json.dumps(got, ensure_ascii=False)}")
         want = {
-            "r1": (200, 220),   # 没存过 → 初始尺寸（**就是屏幕上的高度**）
-            "r2": (200, 180),   # 存过
-            "r3": (200, 180),   # 存了 150，被下限 180 顶上去
-            "r4": (200, 220),
+            "r1": (200, 200),   # 没存过 → 初始尺寸（**就是屏幕上的高度**）
+            "r2": (200, 260),   # 存过，且高于下限 → 用存的
+            "r3": (200, 200),   # 存了 150，被下限 200 顶上去
+            "r4": (200, 200),
             "p1": (560, 300),   # manifest.size
-            "p2": (350, 280),   # 存的 250 被下限 280 顶上去
-            "p3": (240, 205),   # manifest.size
+            "p2": (350, 250),   # 存的 250 高于 crop 的下限 200 → 用存的
+            "p3": (200, 200),   # manifest.size
         }
         for nid, w in want.items():
             check(f"{nid} = {w[0]}×{w[1]}", got.get(nid) == w, str(got.get(nid)))
@@ -251,7 +297,7 @@ def part_b() -> None:
               sorted(dirty) == ["p2", "r2", "r3"], str(sorted(dirty)))
 
         # 改「初始尺寸」：没存过的跟着变，存过的不动
-        size_pin = dict(orig_size.get("resource") or {"w": 200, "h": 220})
+        size_pin = dict(orig_size.get("resource") or {"w": 200, "h": 200})
         try:
             after = req("PATCH", "/api/settings",
                         {"nodeSize": {"resource": {"w": size_pin["w"], "h": 300}}})
@@ -259,20 +305,20 @@ def part_b() -> None:
             print(f"   初始高度 {size_pin['h']} → 300 之后：{json.dumps(g2, ensure_ascii=False)}")
             check("改 nodeSize 后 sizeSpec 跟着变", after["sizeSpec"]["resource"]["h"] == 300)
             check("没存过尺寸的节点跟着变（r1 → 300）", g2["r1"][1] == 300, str(g2["r1"]))
-            check("存过尺寸的节点纹丝不动（r2 仍是 180）", g2["r2"][1] == 180, str(g2["r2"]))
+            check("存过尺寸的节点纹丝不动（r2 仍是 260）", g2["r2"][1] == 260, str(g2["r2"]))
         finally:
             req("PATCH", "/api/settings", {"nodeSize": {"resource": size_pin}})
             check("初始尺寸已改回", True)
 
         # 改「最小尺寸」：存过的也得服从下限
-        min_pin = dict(orig_min.get("resource") or {"w": 200, "h": 180})
+        min_pin = dict(orig_min.get("resource") or {"w": 200, "h": 200})
         try:
             after = req("PATCH", "/api/settings",
                         {"nodeMin": {"resource": {"w": min_pin["w"], "h": 400}}})
             g3 = {r["id"]: (r["w"], r["h"]) for r in after["graph"]["resources"]}
-            print(f"   最小高度 180 → 400 之后：{json.dumps(g3, ensure_ascii=False)}")
-            check("最小尺寸兜底：r2(h=180) 被顶到 400", g3["r2"][1] == 400, str(g3["r2"]))
-            check("最小尺寸兜底：r1 用初始 220 → 400", g3["r1"][1] == 400, str(g3["r1"]))
+            print(f"   最小高度 {min_pin['h']} → 400 之后：{json.dumps(g3, ensure_ascii=False)}")
+            check("最小尺寸兜底：r2(h=260) 被顶到 400", g3["r2"][1] == 400, str(g3["r2"]))
+            check("最小尺寸兜底：r1 用初始 200 → 400", g3["r1"][1] == 400, str(g3["r1"]))
             check("sizeSpec 里的 minH 也跟着变", after["sizeSpec"]["resource"]["minH"] == 400)
         finally:
             req("PATCH", "/api/settings", {"nodeMin": {"resource": min_pin}})
@@ -282,24 +328,29 @@ def part_b() -> None:
             req("POST", "/api/workspace", {"path": orig_ws})
         except Exception:  # noqa: BLE001
             pass
-        # 下限是用户级设置：把跑之前那份**原样**还回去（上面钉住的是期望值）
+        # 下限是用户级设置：把跑之前那份**原样**还回去。
+        # 钉住的每一项都要还 —— 原本就有的写回原值，原本没有的写 `null` 删掉
+        # （不还的话会在用户机器上凭空多出几行 `process:<defId>` 的设置）
         try:
-            back = {k: v for k, v in orig_min.items() if k in ("resource", "process")}
-            if back:
-                req("PATCH", "/api/settings", {"nodeMin": back})
-                check("下限已还回本机原值", True)
+            back = {
+                k: (dict(orig_min[k]) if k in orig_min else None)
+                for k in PIN_MIN
+            }
+            req("PATCH", "/api/settings", {"nodeMin": back})
+            check("下限已还回本机原值", True)
         except Exception:  # noqa: BLE001
             pass
         shutil.rmtree(TMPWS, ignore_errors=True)
         print(f"   已恢复工作目录 {orig_ws}")
 
-    # 前端构建产物里不该再有第二份尺寸常量
+    # 前端构建产物里不该再有第二份尺寸常量。这几个探针是尺寸表里最有辨识度的组合：
+    # 一旦有人在 App.jsx 里重新写死一份 `RESOURCE_SIZE` / `PROCESS_SIZE`，这里就会红
     js = sorted((ROOT / "server" / "static" / "assets").glob("index-*.js"))
     if js:
         text = js[-1].read_text(encoding="utf-8", errors="replace")
-        check("前端构建产物里没有硬编码的节点尺寸常量",
-              "w:200,h:220" not in text and "minW:560,minH:280" not in text,
-              js[-1].name)
+        probes = ["w:200,h:200", "w:600,h:340", "minW:560,minH:280"]
+        hit = [p for p in probes if p in text]
+        check("前端构建产物里没有硬编码的节点尺寸常量", not hit, f"{js[-1].name} 命中 {hit}")
     else:
         print("  [SKIP] server/static 还没有构建产物")
 

@@ -44,13 +44,15 @@ from __future__ import annotations
 SIZE_RANGE = (80, 4000)
 
 # 兜底常量：**全项目唯一一份**。前端不再有自己的副本。
-# resource 的 h 取 220 是刻意的 —— 这就是数据节点在屏幕上的实际高度（前端渲染口径）。
+# 这两张表就是 `main.DEFAULT_SETTINGS` 里 `nodeSize` / `nodeMin` 的最终兜底，
+# 两边**必须同值** —— 它们只在设置里那一项缺失时才轮到（正常运行时设置总是全的），
+# 一旦不同就会出现"服务端排版按一个高、前端渲染按另一个高"的假缝（§3.5.1 那段）。
 SIZE_FALLBACK = {
-    "resource": {"w": 200, "h": 220},
+    "resource": {"w": 200, "h": 200},
     "process": {"w": 600, "h": 340},
 }
 MIN_FALLBACK = {
-    "resource": {"w": 200, "h": 180},
+    "resource": {"w": 200, "h": 200},
     "process": {"w": 560, "h": 280},
 }
 

@@ -66,7 +66,9 @@ async function main() {
   const pid = st.graph.processes[st.graph.processes.length - 1].id
   const boot = await state()
   const msz = boot.manifests.qwen_image.size
-  const pmin = boot.settings.nodeMin.process
+  // 下限要取**服务端算出来的有效值**（sizeSpec），不能只看 settings.nodeMin.process ——
+  // 那只是通用兜底，`process:<defId>` 可以单独覆盖（qwen_image 就有自己的一行）
+  const pmin = boot.sizeSpec['process:qwen_image'] || boot.settings.nodeMin.process
 
   let target = null
   for (let i = 0; i < 120; i++) {
@@ -314,13 +316,13 @@ async function main() {
       check('点空白处后隐藏', false, '没找到空白点')
     }
 
-    console.log('\n[4] 最小宽度（设置在 settings.nodeMin 里）')
+    console.log('\n[4] 最小宽度（服务端 sizeSpec 里的 minW / minH）')
     const hp = await handlePoint(pid)
     await click((await headPoint(pid)).x, (await headPoint(pid)).y)
     await drag(hp.x, hp.y, -1000, -1000)
     const shrunk = await nodeSize(pid)
-    console.log(`   拖到极限 ${Math.round(shrunk.w / z)}×${Math.round(shrunk.h / z)}   最小应为 ${pmin.w}×${pmin.h}`)
-    check('宽度卡在设置里的最小宽度', Math.round(shrunk.w / z) >= pmin.w - 2, `${Math.round(shrunk.w / z)} >= ${pmin.w}`)
+    console.log(`   拖到极限 ${Math.round(shrunk.w / z)}×${Math.round(shrunk.h / z)}   最小应为 ${pmin.minW}×${pmin.minH}`)
+    check('宽度卡在设置里的最小宽度', Math.round(shrunk.w / z) >= pmin.minW - 2, `${Math.round(shrunk.w / z)} >= ${pmin.minW}`)
   } finally {
     ws.close()
     chrome.kill()

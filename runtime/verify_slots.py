@@ -51,7 +51,7 @@ def part_a() -> None:
     print("[A] slot_origin / resource_height：落点按节点实际尺寸算")
     print("=" * 62)
     manifest = {"id": "qwen_image", "size": {"defaultWidth": 600, "defaultHeight": 340}}
-    settings = {"nodeMin": {"resource": {"w": 200, "h": 180}, "process": {"w": 560, "h": 280}}}
+    settings = {"nodeMin": {"resource": {"w": 200, "h": 200}, "process": {"w": 560, "h": 280}}}
 
     proc = {"id": "p1", "defId": "qwen_image", "x": 1000, "y": 200}
     bx, by = engine_mod.slot_origin(proc, manifest, settings)
@@ -61,16 +61,16 @@ def part_a() -> None:
 
     # 纵向间距的依据：数据节点的**实际渲染高**，必须和前端算法一致
     rh = lambda r: engine_mod.resource_height(r, settings)  # noqa: E731
-    print(f"   实际渲染高：无尺寸={rh({})}  h=180 → {rh({'h': 180})}  "
+    print(f"   实际渲染高：无尺寸={rh({})}  h=260 → {rh({'h': 260})}  "
           f"h=150 → {rh({'h': 150})}  h=364 → {rh({'h': 364})}")
-    check("没存过尺寸 → 默认高 220（数据节点在屏幕上的实际高度，见 nodespec）",
-          rh({}) == 220, str(rh({})))
-    check("存了 h=180 → 实际高 180（用户报的那个场景）", rh({"h": 180}) == 180, str(rh({"h": 180})))
-    check("存了 h=150 但下限是 180 → 被下限兜到 180", rh({"h": 150}) == 180, str(rh({"h": 150})))
+    check("没存过尺寸 → 默认高 200（数据节点在屏幕上的实际高度，见 nodespec）",
+          rh({}) == 200, str(rh({})))
+    check("存了 h=260 → 实际高 260（用户报的那个场景）", rh({"h": 260}) == 260, str(rh({"h": 260})))
+    check("存了 h=150 但下限是 200 → 被下限兜到 200", rh({"h": 150}) == 200, str(rh({"h": 150})))
     check("存了 h=364 → 用 364", rh({"h": 364}) == 364, str(rh({"h": 364})))
     check("间距不再写死：调矮后间距跟着变",
-          rh({}) + 10 == 230 and rh({"h": 180}) + 10 == 190,
-          f"220→{rh({}) + 10}, 180→{rh({'h': 180}) + 10}")
+          rh({}) + 10 == 210 and rh({"h": 260}) + 10 == 270,
+          f"200→{rh({}) + 10}, 260→{rh({'h': 260}) + 10}")
 
     # 用户把节点拖大了 → 落点跟着让开
     proc2 = dict(proc, w=880)
@@ -161,7 +161,7 @@ def part_b() -> None:
         check("产出了 3 个输出节点", len(outs) == 3, str(len(outs)))
 
         pw, ph = 600.0, 340.0          # 节点渲染尺寸（manifest defaultWidth/Height，未拖动）
-        rw, rh = 200.0, 220.0          # 数据节点渲染尺寸（nodespec 的初始尺寸）
+        rw, rh = 200.0, 200.0          # 数据节点渲染尺寸（nodespec 的初始尺寸）
         ok_right = all(o["x"] >= proc["x"] + pw for o in outs)
         check("都在处理节点右侧（不压住上游）", ok_right,
               f"最小 x 差 {min(o['x'] for o in outs) - proc['x']:.0f} >= {pw:.0f}")

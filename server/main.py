@@ -77,18 +77,24 @@ DEFAULT_SETTINGS: dict = {
     # 注意 nodeSize 里**不写**各处理节点类型的条目 —— 那些由 manifest.size 声明
     # （脚本作者最清楚自己的节点该多大），写在这里等于多养一份会漂移的副本。
     "nodeSize": {
-        "resource": {"w": 200, "h": 220},
+        "resource": {"w": 200, "h": 200},
         "process": {"w": 600, "h": 340},
     },
+    # 各处理节点类型的默认下限 —— 界面上一行一行调出来之后固化的值
+    # （2026-10-14）。绝大多数是 200×200；裁剪要放下它的两个数字框，所以是 220×200。
+    # `process` 那条是**兜底**（脚本没声明、设置里也没有它那一行时用），所以保持大一点。
     "nodeMin": {
-        "resource": {"w": 200, "h": 180},
+        "resource": {"w": 200, "h": 200},
         "process": {"w": 560, "h": 280},
-        # 各处理节点类型的默认下限（用户实测后定下的值）
-        "process:crop": {"w": 280, "h": 280},
-        "process:qwen_image": {"w": 560, "h": 280},
-        "process:resize": {"w": 180, "h": 180},
-        "process:square_pad": {"w": 280, "h": 280},
-        "process:recolor": {"w": 220, "h": 210},
+        "process:alpha": {"w": 200, "h": 200},
+        "process:alpha_erase": {"w": 200, "h": 200},
+        "process:color_balance": {"w": 200, "h": 200},
+        "process:crop": {"w": 220, "h": 200},
+        "process:qwen_image": {"w": 200, "h": 200},
+        "process:recolor": {"w": 200, "h": 200},
+        "process:region_erase": {"w": 200, "h": 200},
+        "process:resize": {"w": 200, "h": 200},
+        "process:square_pad": {"w": 200, "h": 200},
     },
 }
 

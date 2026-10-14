@@ -25,11 +25,16 @@
       "label": "Alpha 阈值"
     }
   ],
-  "outputs": [{ "key": "image", "type": "image", "multi": true }],
-
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
   "_note": "逐张独立处理：把 alpha **低于阈值**的像素的 RGB 置 0（alpha 本身不动）。用来清掉透明底里残留的杂色 —— 例如 Qwen 的透明输出在 alpha≈0 处留着一层紫红色填充，压到白底上会被看成「淡紫灰色背景」。没有 alpha 通道的图原样输出。阈值单位是 0~255，和查看器里显示的 A 一致。多输入逐张独立，几张进几张出。",
   "size": {
-    "defaultWidth": 220,
-    "defaultHeight": 210
+    "defaultWidth": 200,
+    "defaultHeight": 200
   }
 }
