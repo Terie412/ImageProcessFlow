@@ -23,7 +23,8 @@ const nodeTypes = { resource: ResourceNode, process: ProcessNode }
  *
  * 唯一的事实来源是 `server/nodespec.py`，随 /api/state 下发三样：
  *   - graph 里每个节点的 `w` / `h` —— 服务端算好的**最终渲染尺寸**
- *   - `sizeSpec`                   —— 每个已知类型的 {w,h,minW,minH}（初始 / 最小）
+ *   - `sizeSpec`                   —— 每个已知类型的 {w,h,minW,minH}（初始 / 最小；
+ *                                     最小恒为 200×200，见服务端 `nodespec.MIN_SIZE`）
  *   - `sizeRange`                  —— 宽高的允许区间（表单的 min/max 用）
  *
  * 为什么不在前端自己算：这里原有一份 `RESOURCE_SIZE` / `PROCESS_SIZE`，和服务端
@@ -67,10 +68,10 @@ const clampScaleSnap = (v) => {
 }
 
 /*
- * 尺寸规格按「具体节点类型」索引，与服务端的 `settings.nodeSize` / `settings.nodeMin`
- * 完全同一套 key（`resource` / `process:<defId>` / `process` 兜底）：
- *   初始尺寸 nodeSize → 节点没被拖过右下角手柄时该多大
- *   最小尺寸 nodeMin  → 拖手柄时的下限
+ * 尺寸规格按「具体节点类型」索引，与服务端的 `settings.nodeSize` 同一套 key
+ * （`resource` / `process:<defId>` / `process` 兜底）：
+ *   初始尺寸 nodeSize → 节点没被拖过右下角手柄时该多大（⚙ 里可改）
+ *   最小尺寸         → 所有类型统一 200×200，写死在服务端 `nodespec.MIN_SIZE`，不配置
  * 具体取哪一条、怎么兜底，都在服务端 `nodespec.py` 里做完了，前端只查 `sizeSpec`。
  */
 
@@ -933,7 +934,7 @@ export default function App() {
         const s = await api.updateSettings({ [key]: value })
         // 尺寸设置会改变节点渲染（初始尺寸 / 最小尺寸都参与），所以要重建画布
         // 而不只是换 state —— 改完当场重排，不用刷新
-        if (key === 'nodeSize' || key === 'nodeMin') applyState(s)
+        if (key === 'nodeSize') applyState(s)
         else setState(s)
       } catch (e) {
         flash(e.message)
@@ -942,7 +943,7 @@ export default function App() {
     [applyState, flash],
   )
 
-  /* ---- 设置浮层里的「节点尺寸」：本地草稿（一行 = 一个节点类型，含初始/最小两组），
+  /* ---- 设置浮层里的「节点尺寸」：本地草稿（一行 = 一个节点类型的一组 w×h），
      失焦时才提交 ---- */
   const [sizeDraft, setSizeDraft] = useState(null)
 
@@ -986,42 +987,30 @@ export default function App() {
     setShowSettings((v) => !v)
   }, [showSettings])
 
-  /* 尺寸草稿 → 提交。一次失焦只改一个字段，所以最多发出一个请求：
-     改「初始」发 nodeSize、改「最小」发 nodeMin（服务端负责与当前值合并）。
-     没改的那一组不发 —— 否则每次失焦都要重建一遍画布。 */
+  /* 尺寸草稿 → 提交。一次失焦只发一条 `nodeSize`（服务端负责与当前值合并）。
+     最小尺寸不在这里配 —— 所有类型统一 200×200，写死在服务端（`nodespec.MIN_SIZE`）。
+     填的数字**先夹到区间下界**再发，所以界面上存不下比下限还小的初始尺寸。 */
   const commitSize = useCallback(
     (key) => {
       const d = sizeDraft?.[key]
       if (!d) return
       const eff = specOf(state, key) || {}
       // 只接受正数；清空 / 乱填一律丢掉草稿，输入框退回显示服务端的值。
-      // 区间由服务端夹（nodespec.SIZE_RANGE），前端不重复一份数字。
+      // 区间以服务端下发的 sizeRange 为准，这里的 200 只是它没答上来时的兜底。
+      const lo = Number(state?.sizeRange?.[0]) || 200
       const num = (v) => {
         const n = Number(v)
-        return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+        return Number.isFinite(n) && n > 0 ? Math.max(lo, Math.round(n)) : null
       }
-      const group = (a, b) => {
-        const w = num(d[a] ?? eff[a])
-        const h = num(d[b] ?? eff[b])
-        return w === null || h === null ? null : { w, h }
-      }
-      const size = group('w', 'h')
-      const mins = group('minW', 'minH')
-      if (!size || !mins) {
-        setSizeDraft((s) => {
-          const next = { ...(s || {}) }
-          delete next[key]
-          return next
-        })
-        return
-      }
+      const w = num(d.w ?? eff.w)
+      const h = num(d.h ?? eff.h)
       setSizeDraft((s) => {
         const next = { ...(s || {}) }
         delete next[key] // 清掉草稿 → 输入框显示服务端（夹过）的值
         return next
       })
-      if (size.w !== eff.w || size.h !== eff.h) saveSetting('nodeSize', { [key]: size })
-      if (mins.w !== eff.minW || mins.h !== eff.minH) saveSetting('nodeMin', { [key]: mins })
+      if (w === null || h === null) return
+      if (w !== eff.w || h !== eff.h) saveSetting('nodeSize', { [key]: { w, h } })
     },
     [sizeDraft, state, saveSetting],
   )
@@ -1424,7 +1413,6 @@ export default function App() {
                 <div className="set-head">
                   <span>类型</span>
                   <span>初始</span>
-                  <span>最小</span>
                 </div>
                 {sizeRows(state).map((row) => {
                   const eff = specOf(state, row.key)
@@ -1435,31 +1423,30 @@ export default function App() {
                       [row.key]: { ...eff, ...(d?.[row.key] || {}), [f]: raw },
                     }))
                   return (
-                    // 每行两组：初始（w×h）与最小（w×h）。数字的权威在服务端 ——
-                    // 这里只负责把用户输入的草稿发出去，回来的是被夹过的值
+                    // 一行一个类型、只有一组 w×h（初始尺寸）。最小值不在这里配 ——
+                    // 所有类型统一 200×200，写死在服务端（nodespec.MIN_SIZE）。
+                    // 数字的权威在服务端：这里只把草稿发出去，回来的是被夹过的值。
                     <div className="set-field set-sizes" key={row.key}>
                       <span className="set-name" title={row.label}>
                         {row.label}
                       </span>
-                      {[['w', 'h'], ['minW', 'minH']].map((pair) => (
-                        <div className="set-size" key={pair[0]}>
-                          {pair.map((f, i) => (
-                            <React.Fragment key={f}>
-                              {i ? <span className="set-x">×</span> : null}
-                              <input
-                                type="number"
-                                min={state?.sizeRange?.[0]}
-                                max={state?.sizeRange?.[1]}
-                                step={10}
-                                value={val(f)}
-                                onChange={(e) => edit(f, e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                                onBlur={() => commitSize(row.key)}
-                              />
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      ))}
+                      <div className="set-size">
+                        {['w', 'h'].map((f, i) => (
+                          <React.Fragment key={f}>
+                            {i ? <span className="set-x">×</span> : null}
+                            <input
+                              type="number"
+                              min={state?.sizeRange?.[0]}
+                              max={state?.sizeRange?.[1]}
+                              step={10}
+                              value={val(f)}
+                              onChange={(e) => edit(f, e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                              onBlur={() => commitSize(row.key)}
+                            />
+                          </React.Fragment>
+                        ))}
+                      </div>
                     </div>
                   )
                 })}

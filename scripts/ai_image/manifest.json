@@ -111,7 +111,7 @@
       "multi": true
     }
   ],
-  "_note": "参数上的 backend 决定「选中哪个后端的模型时显示这套参数」，见 DESIGN.md §3.4。最小尺寸不在这里声明 —— 它是用户级偏好，在设置的 nodeMin 里调。",
+  "_note": "参数上的 backend 决定「选中哪个后端的模型时显示这套参数」，见 DESIGN.md §3.4。最小尺寸也不在这里声明 —— 所有节点类型统一 200×200，写死在 server/nodespec.py 的 MIN_SIZE（不可配置）。",
   "size": {
     "defaultWidth": 560,
     "defaultHeight": 300

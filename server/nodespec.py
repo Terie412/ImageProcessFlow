@@ -15,9 +15,9 @@
 ```
 manifest.size（脚本作者声明的初始尺寸）
       ↓ 被覆盖
-settings.nodeSize / settings.nodeMin（应用级，界面 ⚙ 里可改）
+settings.nodeSize（应用级，界面 ⚙ 里可改）
       ↓ 兜底
-本模块的 SIZE_FALLBACK / MIN_FALLBACK —— 唯一一份常量
+本模块的 SIZE_FALLBACK —— 唯一一份常量
       ↓ 解析
 /api/state.sizeSpec（前端唯一读取入口，只查表、自己不再有任何数字）
 ```
@@ -27,11 +27,11 @@ settings.nodeSize / settings.nodeMin（应用级，界面 ⚙ 里可改）
 | 概念 | 含义 | 权威来源 |
 | --- | --- | --- |
 | **初始尺寸** | 节点从没被拖过右下角手柄时该多大 | manifest（处理节点）/ `settings.nodeSize` |
-| **最小尺寸** | 拖手柄时的下限 | `settings.nodeMin` |
+| **最小尺寸** | 拖手柄时的下限 | 本模块 `MIN_SIZE` —— **写死 200×200，不可配** |
 | **最终尺寸** | `max(最小尺寸, 存的 w/h ?? 初始尺寸)` | 本模块 `size_of()` |
 
-三者都按**具体节点类型**索引：`resource` / `process:<defId>` / `process`（兜底），
-与 `settings.nodeMin` 的既有形状保持一致。
+初始尺寸按**具体节点类型**索引：`resource` / `process:<defId>` / `process`（兜底）。
+最小尺寸对所有类型是同一个数（`MIN_SIZE`），所以**不存在按类型配置的那张表了**。
 
 > ⚠️ 「最终尺寸」是**算出来的**，不是存下来的 —— 节点只在被拖过之后才有 `w`/`h`。
 > 所以任何需要知道「这个节点多大」的代码（前端渲染、服务端的槽位落点 / 布局）
@@ -41,19 +41,24 @@ from __future__ import annotations
 
 # 尺寸的允许区间（宽高都按这个夹）。与前端表单的 min/max 一致，
 # 通过 /api/state 的 `sizeRange` 下发，前端不再自己写一份。
-SIZE_RANGE = (80, 4000)
+#
+# **下界就是最小尺寸**（= MIN_SIZE）：能填的范围与拖拽下限是同一个数，
+# 于是「初始尺寸不小于最小尺寸」靠这一处 clamp 就成立，不必两处对齐。
+SIZE_RANGE = (200, 4000)
 
-# 兜底常量：**全项目唯一一份**。前端不再有自己的副本。
-# 这两张表就是 `main.DEFAULT_SETTINGS` 里 `nodeSize` / `nodeMin` 的最终兜底，
-# 两边**必须同值** —— 它们只在设置里那一项缺失时才轮到（正常运行时设置总是全的），
+# 最小尺寸：**所有节点类型统一 200×200，写死在这里、不配置**（2026-10-14 定）。
+# 原先它是 `settings.nodeMin` 里的一张表、界面 ⚙ 上逐类型可调，但实测没有第二种用法 ——
+# 九个脚本里八个本来就是 200×200，只有裁剪按 220 单独调过。既然没有差别，那张表就是
+# 纯粹的配置负担（还得多养一份与 DEFAULT_SETTINGS 对齐的副本），直接写死。
+MIN_SIZE = {"w": SIZE_RANGE[0], "h": SIZE_RANGE[0]}
+
+# 初始尺寸的兜底常量：**全项目唯一一份**。前端不再有自己的副本。
+# 这张表就是 `main.DEFAULT_SETTINGS.nodeSize` 的最终兜底，两边**必须同值** ——
+# 它只在设置里那一项缺失时才轮到（正常运行时设置总是全的），
 # 一旦不同就会出现"服务端排版按一个高、前端渲染按另一个高"的假缝（§3.5.1 那段）。
 SIZE_FALLBACK = {
     "resource": {"w": 200, "h": 200},
     "process": {"w": 600, "h": 340},
-}
-MIN_FALLBACK = {
-    "resource": {"w": 200, "h": 200},
-    "process": {"w": 560, "h": 280},
 }
 
 
@@ -97,7 +102,7 @@ def spec_of(
 ) -> dict:
     """解析出**一个节点类型**的尺寸规格：`{w, h, minW, minH}`。
 
-    `w` / `h` 是初始尺寸，`minW` / `minH` 是最小尺寸。
+    `w` / `h` 是初始尺寸（可配），`minW` / `minH` 是最小尺寸（**恒为 `MIN_SIZE`**）。
 
     **初始尺寸的优先级**（`exact` = 针对这个类型写的设置）：
 
@@ -107,14 +112,12 @@ def spec_of(
     不是「一把改掉所有处理节点」的总开关。否则它会把每个脚本自己声明的尺寸全盖掉
     （实测踩过：Qwen 节点该是 manifest 的 560×300，被通用兜底盖成 600×340）。
 
-    **最小尺寸的优先级**（不涉及 manifest，那是脚本的属性、不是用户偏好）：
-
-        nodeMin[<key>]  >  nodeMin.process  >  MIN_FALLBACK
+    初始尺寸与最小尺寸共用 `SIZE_RANGE` 的**同一个下界**，所以返回值里的 `w`/`h`
+    天然不小于 `minW`/`minH` —— 设置里填多小都压不到下限以下。
     """
     st = settings or {}
     fb = SIZE_FALLBACK["resource" if kind == "resource" else "process"]
 
-    # 初始尺寸
     size_table = st.get("nodeSize")
     exact = _entry(size_table, key)
     generic = None if kind == "resource" else _entry(size_table, "process")
@@ -130,29 +133,19 @@ def spec_of(
                 return _clamp(_num(v, fb[field]))
         return _clamp(fb[field])
 
-    w = pick("w", "defaultWidth")
-    h = pick("h", "defaultHeight")
-
-    # 最小尺寸
-    min_table = st.get("nodeMin")
-    m_exact = _entry(min_table, key)
-    m_generic = None if kind == "resource" else _entry(min_table, "process")
-    mfb = MIN_FALLBACK["resource" if kind == "resource" else "process"]
-
-    def pick_min(field: str) -> float:
-        for v in ((m_exact or {}).get(field), (m_generic or {}).get(field)):
-            if v is not None:
-                return _clamp(_num(v, mfb[field]))
-        return _clamp(mfb[field])
-
-    return {"w": w, "h": h, "minW": pick_min("w"), "minH": pick_min("h")}
+    return {
+        "w": pick("w", "defaultWidth"),
+        "h": pick("h", "defaultHeight"),
+        "minW": MIN_SIZE["w"],
+        "minH": MIN_SIZE["h"],
+    }
 
 
 def resolve_types(registry: dict | None, settings: dict | None) -> dict[str, dict]:
     """解析出**每个已知类型**的尺寸规格，供 `/api/state.sizeSpec` 下发。
 
     前端拿到这张表之后只做查表，不再自己推算尺寸。
-    key 与 `settings.nodeMin` 一致：`resource` / `process` / `process:<defId>`。
+    key 与 `settings.nodeSize` 一致：`resource` / `process` / `process:<defId>`。
     """
     out = {
         "resource": spec_of("resource", "resource", None, settings),

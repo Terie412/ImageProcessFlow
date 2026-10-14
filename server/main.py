@@ -72,31 +72,15 @@ DEFAULT_SETTINGS: dict = {
     # **0 或负数 = 关闭**（负数统一归到 0）；单位是 px，默认 10。
     "scaleSnap": 10,
     # 节点尺寸：**唯一一份**配置，见 server/nodespec.py。
-    # 两个表形状一致，key 都是 resource / process:<defId> / process：
+    # key 是 resource / process:<defId> / process（兜底），值是 {w, h}。
     #   nodeSize → **初始尺寸**（节点没被拖过右下角手柄时该多大）
-    #   nodeMin  → **最小尺寸**（拖手柄时的下限）
     # 放在设置里而不是 manifest 里：这是用户的个人偏好，不是脚本的属性。
     # 注意 nodeSize 里**不写**各处理节点类型的条目 —— 那些由 manifest.size 声明
     # （脚本作者最清楚自己的节点该多大），写在这里等于多养一份会漂移的副本。
+    # **最小尺寸不在这里** —— 所有类型统一 200×200，写死在 nodespec.MIN_SIZE。
     "nodeSize": {
         "resource": {"w": 200, "h": 200},
         "process": {"w": 600, "h": 340},
-    },
-    # 各处理节点类型的默认下限 —— 界面上一行一行调出来之后固化的值
-    # （2026-10-14）。绝大多数是 200×200；裁剪要放下它的两个数字框，所以是 220×200。
-    # `process` 那条是**兜底**（脚本没声明、设置里也没有它那一行时用），所以保持大一点。
-    "nodeMin": {
-        "resource": {"w": 200, "h": 200},
-        "process": {"w": 560, "h": 280},
-        "process:alpha": {"w": 200, "h": 200},
-        "process:alpha_erase": {"w": 200, "h": 200},
-        "process:color_balance": {"w": 200, "h": 200},
-        "process:crop": {"w": 220, "h": 200},
-        "process:ai_image": {"w": 200, "h": 200},
-        "process:recolor": {"w": 200, "h": 200},
-        "process:region_erase": {"w": 200, "h": 200},
-        "process:resize": {"w": 200, "h": 200},
-        "process:square_pad": {"w": 200, "h": 200},
     },
 }
 
@@ -115,10 +99,13 @@ def _valid_size_key(k: str) -> bool:
 
 
 def _coerce_size_map(value, current: dict, dflt: dict) -> dict | None:
-    """校验 nodeSize / nodeMin：只认已知的 key，宽高取整并夹到合理区间。
+    """校验 nodeSize：只认已知的 key，宽高取整并夹到合理区间。
 
     某个 `process:<defId>` 传 `null` 表示**删掉这一项**（回到通用 `process` 兜底）。
     `resource` / `process` 这两个基准项不允许删。
+
+    区间下界就是最小尺寸（`nodespec.SIZE_RANGE[0] == MIN_SIZE`），
+    所以这里夹完的初始尺寸必然不小于拖拽下限。
     """
     if not isinstance(value, dict):
         return None
@@ -147,7 +134,7 @@ def _coerce_size_map(value, current: dict, dflt: dict) -> dict | None:
 
 def _coerce_setting(key: str, value, current: dict):
     """校验/规范化一个设置项；不合法返回 None（调用方跳过这一项）。"""
-    if key in ("nodeSize", "nodeMin"):
+    if key == "nodeSize":
         return _coerce_size_map(value, current.get(key), DEFAULT_SETTINGS[key])
     if key == "gridSize":
         # 允许 "5" / 5 / 5.0 这类写法，取整后夹到合理区间 —— 0 会让吸附退化成空操作

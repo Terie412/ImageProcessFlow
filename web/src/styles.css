@@ -144,14 +144,15 @@ body {
 .settings-pop .set-size input { width: 72px; padding: 4px 6px; }
 .settings-pop .set-x { color: var(--muted); font-size: 11px; }
 
-/* 「节点尺寸」表：一列类型 + 两列（初始 / 最小），值来自服务端的 sizeSpec。
-   两列表头与下面的两组合计宽度同为 110px，所以能对齐。 */.settings-pop .set-head {
-  display: grid; grid-template-columns: 1fr 110px 110px; gap: 8px;
+/* 「节点尺寸」表：一列类型 + 一列初始尺寸（w × h），值来自服务端的 sizeSpec。
+   最小值不再列出来 —— 所有类型统一 200×200，写死在服务端（nodespec.MIN_SIZE）。 */
+.settings-pop .set-head {
+  display: grid; grid-template-columns: 1fr 110px; gap: 8px;
   padding: 2px 9px 3px; color: var(--muted); font-size: 11px; letter-spacing: .3px;
 }
 .settings-pop .set-head span:not(:first-child) { text-align: center; }
 .settings-pop .set-field.set-sizes {
-  display: grid; grid-template-columns: 1fr 110px 110px; gap: 8px;
+  display: grid; grid-template-columns: 1fr 110px; gap: 8px;
   align-items: center; padding: 3px 9px 4px;
 }
 .settings-pop .set-field.set-sizes > .set-name {
