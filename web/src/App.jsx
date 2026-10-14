@@ -186,6 +186,15 @@ function buildEdges(state) {
   return [...implicit, ...real]
 }
 
+/* 路径末段 —— 顶栏的工作区方块只显示最后一级目录名，完整路径挂在 title 上（悬浮可见）。
+   Windows 的 `\` 与 Unix 的 `/` 都认；尾部多余的分隔符（`E:\`）先削掉再取，
+   否则会切出一个空串。整条路径不含分隔符时原样返回。 */
+const baseName = (p) => {
+  const s = String(p || '').replace(/[\\/]+$/, '')
+  const i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'))
+  return i >= 0 ? s.slice(i + 1) : s
+}
+
 /* ------------------------------------------------------------------ */
 export default function App() {
   const [state, setState] = useState(null)
@@ -1176,7 +1185,9 @@ export default function App() {
                 strokeLinejoin="round"
               />
             </svg>
-            <span className="ws-path">{state?.workspace || '选择工作目录'}</span>
+            <span className="ws-path">
+              {state?.workspace ? baseName(state.workspace) : '选择工作目录'}
+            </span>
           </button>
 
           {/* 画布：一个分段控件（标签 + 下拉 + ＋ + ✎ + ⋯ 共用一个边框）。
