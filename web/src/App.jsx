@@ -1337,11 +1337,10 @@ export default function App() {
                     checked={!!state?.settings?.showLog}
                     onChange={(e) => saveSetting('showLog', e.target.checked)}
                   />
-                  <span>显示执行日志</span>
+                  <span title="打开后执行节点时右下角显示实时日志；面板上的「关闭」等于把这里关掉">
+                    显示执行日志
+                  </span>
                 </label>
-                <div className="set-note">
-                  打开后执行节点时右下角显示实时日志；面板上的「关闭」等于把这里关掉
-                </div>
 
                 <div className="set-sep" />
                 <div className="set-group">提示词润色（DeepSeek）</div>
@@ -1402,7 +1401,9 @@ export default function App() {
                 <div className="set-sep" />
                 <div className="set-group">缩放吸附</div>
                 <label className="set-field">
-                  <span>拖右下角改大小时吸附</span>
+                  <span title="0 或负数 = 关闭；大于 0 时节点宽高只能是它的整数倍">
+                    拖右下角改大小时吸附
+                  </span>
                   <div className="set-size">
                     <input
                       type="number"
@@ -1417,9 +1418,6 @@ export default function App() {
                     <span className="set-x">px</span>
                   </div>
                 </label>
-                <div className="set-note">
-                  0 或负数 = 关闭；大于 0 时节点宽高只能是它的整数倍
-                </div>
 
                 <div className="set-sep" />
                 <div className="set-group">节点尺寸</div>

@@ -125,12 +125,16 @@ body {
 .settings-pop .set-group {
   padding: 5px 9px 3px; color: var(--muted); font-size: 11px; letter-spacing: .3px;
 }
-.settings-pop .set-field { display: block; padding: 4px 9px 5px; }
+/* 一个设置项 = **一行**：label 靠左（太长了才省略号），控件贴右。
+   解释性文字不再另起一行占版面，挂在 label 的 title 上（鼠标悬浮才弹）。 */
+.settings-pop .set-field { display: flex; align-items: center; gap: 10px; padding: 4px 9px 5px; }
 .settings-pop .set-field > span {
-  display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px;
+  flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.settings-pop .set-field > .set-size { flex: 0 0 auto; }
 .settings-pop .set-field input {
-  width: 100%; font: inherit; font-size: 11.5px; color: var(--text);
+  width: 170px; font: inherit; font-size: 11.5px; color: var(--text);
   background: #12141a; border: 1px solid var(--line); border-radius: 5px;
   padding: 4px 7px; outline: none;
 }
@@ -141,8 +145,7 @@ body {
 .settings-pop .set-x { color: var(--muted); font-size: 11px; }
 
 /* 「节点尺寸」表：一列类型 + 两列（初始 / 最小），值来自服务端的 sizeSpec。
-   两列表头与下面的两组合计宽度同为 110px，所以能对齐。 */
-.settings-pop .set-head {
+   两列表头与下面的两组合计宽度同为 110px，所以能对齐。 */.settings-pop .set-head {
   display: grid; grid-template-columns: 1fr 110px 110px; gap: 8px;
   padding: 2px 9px 3px; color: var(--muted); font-size: 11px; letter-spacing: .3px;
 }
@@ -1027,8 +1030,5 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .viewer-measure .viewer-size { font-weight: 500; }
 .viewer-measure .viewer-origin { color: var(--muted); }
 
-/* 设置项下面的一句说明（例：缩放吸附的「0 或负数 = 关闭」）。
-   比字段标签再淡一档，不抢视线 —— 这类补充说明只在需要时被读到。 */
-.settings-pop .set-note {
-  padding: 0 9px 5px; color: var(--muted); font-size: 10.5px; line-height: 1.5;
-}
+/* 设置项的解释性文字**不占版面**：写在 label 的 title 上，鼠标悬浮才弹
+   （原先那套 `.set-note` 整行说明已撤掉，例：缩放吸附的「0 或负数 = 关闭」）。 */
