@@ -90,7 +90,7 @@ def part_a() -> None:
         "process:alpha":         ((220, 200), (200, 200)),
         "process:alpha_erase":   ((200, 200), (200, 200)),
         "process:color_balance": ((200, 200), (200, 200)),
-        "process:crop":          ((220, 200), (220, 200)),
+        "process:crop":          ((250, 200), (220, 200)),
         "process:ai_image":    ((560, 300), (200, 200)),
         "process:recolor":       ((200, 200), (200, 200)),
         "process:region_erase":  ((200, 200), (200, 200)),

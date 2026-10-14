@@ -86,7 +86,7 @@
     "notes": "先判断这张图属于哪种情况再挑参数：排列规整（图标表 / 导航栏 / 网格卡片）→ method=gutter；大小不一、散乱排布 → method=cluster；拿不准就 auto。背景是透明的就主要靠 alpha 判定，别去猜 RGB。\n\nmin_gutter / max_gap / min_area 这三个填 0 表示「按图自动算」，这才是推荐的用法；而 color_thr / alpha_thr **不是**自动参数，别填 0，保持默认 24 即可，除非图上确实有噪声或需要更敏感的判定。多数情况下把方法选对就够了，其余保持默认。"
   },
   "size": {
-    "defaultWidth": 220,
+    "defaultWidth": 250,
     "defaultHeight": 200
   }
 }
