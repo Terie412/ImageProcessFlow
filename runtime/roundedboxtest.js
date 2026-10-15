@@ -172,13 +172,32 @@ async function main() {
   check('中心是主体色 #ffffff', shot?.px['256,256']?.join(',') === '255,255,255,255', JSON.stringify(shot?.px['256,256']))
   await snap('node')
 
-  console.log('\n[2] 改参数 → 缩略图实时重画（圆角 0 时左上角应变成不透明的描边色）')
-  check('找得到「圆角」输入框', (await setNumber('圆角', 0)) === true)
+  console.log('\n[2] 改参数 → 缩略图实时重画（圆角 X 改成 0 时，左上角应变成不透明的描边色）')
+  check('找得到「圆角 X」输入框', (await setNumber('圆角 X', 0)) === true)
   let r0 = await waitPixel([6, 6], 255)
-  check('圆角改成 0：角落变成不透明（图真的重画了）', r0.ok, JSON.stringify(r0.shot?.px))
-  await setNumber('圆角', 96)
+  check('圆角 X 改成 0：角落变成不透明（图真的重画了）', r0.ok, JSON.stringify(r0.shot?.px))
+  await setNumber('圆角 X', 96)
   let r1 = await waitPixel([6, 6], 0)
-  check('圆角改回 96：角落又变透明', r1.ok, JSON.stringify(r1.shot?.px))
+  check('圆角 X 改回 96：角落又变透明', r1.ok, JSON.stringify(r1.shot?.px))
+
+  console.log('\n[2b] 椭圆角：横竖两个半径各管一边')
+  await setNumber('圆角 X', 8)
+  await setNumber('圆角 Y', 60)
+  // 三个取点（实测标定，512×512、描边 12、rx=8 ry=60）：
+  //   (4,4) 在椭圆外 → 透明
+  //   (2,10) 竖轴 60 时左边要到 y≈20 才有内容，所以它还是透明的 ——
+  //          若竖轴也按 8 算，这里早该是实的了 ⇒ 这一条真正判别「竖轴是 60」
+  //   (20,4) 横轴只有 8，顶边在 x≥8 就是实的 ⇒ 判别「横轴是 8」
+  const want = { '4,4': 0, '2,10': 0, '20,4': 255 }
+  let ell = null
+  for (let i = 0; i < 40; i++) {
+    ell = await shotPixels([[4, 4], [2, 10], [20, 4]])
+    if (ell.loaded && Object.keys(want).every((k) => ell.px[k]?.[3] === want[k])) break
+    await sleep(200)
+  }
+  check('角落被切掉：(4,4) 透明', ell.px['4,4']?.[3] === 0, JSON.stringify(ell.px['4,4']))
+  check('竖轴 60：左边到 y≈20 才有内容，(2,10) 仍透明', ell.px['2,10']?.[3] === 0, JSON.stringify(ell.px['2,10']))
+  check('横轴 8：顶边 x≥8 就实了，(20,4) 不透明', ell.px['20,4']?.[3] === 255, JSON.stringify(ell.px['20,4']))
 
   console.log('\n[3] 改尺寸参数 → 缩略图跟着变尺寸')
   await setNumber('宽', 320)

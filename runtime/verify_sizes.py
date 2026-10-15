@@ -96,7 +96,7 @@ def part_a() -> None:
         "process:recolor":       (200, 200),
         "process:region_erase":  (200, 200),
         "process:resize":        (200, 200),
-        "process:rounded_box":   (340, 420),
+        "process:rounded_box":   (340, 460),
         "process:square_pad":    (200, 200),
         # 兜底那一行：只给"没声明 size 又没有自己那一行"的类型用
         "process":               (600, 340),
