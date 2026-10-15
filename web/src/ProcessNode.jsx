@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { imageUrl } from './api'
+import { imageUrl, previewNode } from './api'
 
 const STATUS_TEXT = {
   idle: '待执行',
@@ -74,6 +74,7 @@ export default function ProcessNode({ id, data, selected }) {
     onPolish,
     onDetect,
     onEditRegions,
+    onPreviewIcon,
     // 拖手柄时的下限：一律由 App.buildNodes 从服务端的 sizeSpec 带下来，
     // 这里**不留兜底数字** —— 曾经有一份 320×280 从这里和服务端漂移过
     minW,
@@ -210,6 +211,66 @@ export default function ProcessNode({ id, data, selected }) {
         regions,
         title: primary.label || '区域',
       })
+    }
+  }
+
+  /* ---------------- 实时预览缩略图 ----------------
+     manifest 里声明了 `preview` 段的脚本（目前只有「程序化描边圆角框」这种**按参数造图**
+     的节点）会在节点主体里显示一张缩略图：参数一变就让服务端用**脚本自己的绘制代码**
+     重画一张，所以它和点「执行」产出的图是同一份代码、长得一模一样，也不占输出槽位。
+     其它节点 `preview` 是 undefined，下面这些一个都不跑。 */
+  const previewSpec = manifest?.preview || null
+  // 名字带 icon 前缀：上面那个 `shot` 是**区域预览**用来对齐图层尺寸的，别撞上
+  const [iconShot, setIconShot] = useState(null) // { url } 或 { err }
+  const iconUrl = useRef(null) // 当前那张 blob 地址（换图时释放，见下面的 effect）
+  const iconSeq = useRef(0) // 只认最后一次请求，慢的那个回来直接扔掉
+  const iconFirst = useRef(true) // 首次挂载不等防抖 —— 否则节点要空半秒才有图
+  const paramsKey = previewSpec ? JSON.stringify(params) : ''
+
+  useEffect(() => {
+    if (!previewSpec) return undefined
+    const seq = ++iconSeq.current
+    const delay = iconFirst.current ? 0 : 150 // 拖动 / 连打时把请求压成一次
+    iconFirst.current = false
+    const timer = setTimeout(async () => {
+      try {
+        const url = await previewNode(id, params)
+        if (seq !== iconSeq.current) {
+          URL.revokeObjectURL(url) // 已经有更新的一次在路上了，这张没人要
+          return
+        }
+        if (iconUrl.current) URL.revokeObjectURL(iconUrl.current)
+        iconUrl.current = url
+        setIconShot({ url })
+      } catch (e) {
+        if (seq === iconSeq.current) setIconShot({ err: e.message })
+      }
+    }, delay)
+    return () => clearTimeout(timer)
+    // 依赖用**序列化后的参数**：params 对象每次渲染都是新的引用，直接依赖它会把
+    // 请求打成一串连续流，防抖也就白做了
+  }, [paramsKey, previewSpec, id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 卸载时把最后那张 blob 放掉（blob 地址挂在整页的生命周期上，不放就是内存泄漏）
+  useEffect(
+    () => () => {
+      if (iconUrl.current) URL.revokeObjectURL(iconUrl.current)
+    },
+    [],
+  )
+
+  const openPreview = async () => {
+    if (!previewSpec) return
+    try {
+      // **重新取一张**而不是复用缩略图那张：大图窗口开着的时候这边一改参数就会把
+      // 缩略图那张撤掉，端着同一份地址的话窗口里的图会突然裂掉。
+      // 这张地址的所有权交给 App（它负责关窗时释放）。
+      const url = await previewNode(id, params)
+      // 尺寸不在这里传：脚本会夹取参数（填 5000 实际画 2048），报参数值会跟图上对不上，
+      // 交给查看器自己读 PNG 的真实宽高
+      onPreviewIcon(id, { url, title: manifest.name })
+    } catch (e) {
+      setIconShot({ err: e.message })
     }
   }
 
@@ -402,6 +463,27 @@ export default function ProcessNode({ id, data, selected }) {
                   {polishing ? '润色中…' : '润色'}
                 </button>
               </div>
+            </div>
+          ) : null}
+
+          {/* 实时预览缩略图：双击看大图（大图和数据节点是同一个查看器）。
+              这里**不做点击以外的交互** —— 缩略图不是参数，改它没有意义。 */}
+          {previewSpec ? (
+            <div
+              className="icon-shot"
+              onDoubleClick={openPreview}
+              title="按当前参数实时重画 · 双击看大图（与「执行」产出同一份代码）"
+            >
+              {iconShot?.err ? (
+                <div className="ph err">{iconShot.err}</div>
+              ) : iconShot?.url ? (
+                <img src={iconShot.url} alt="预览" draggable={false} />
+              ) : (
+                <div className="ph">绘制中…</div>
+              )}
+              {iconShot?.url && !iconShot?.err ? (
+                <span className="icon-hint">双击看大图</span>
+              ) : null}
             </div>
           ) : null}
 

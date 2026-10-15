@@ -72,6 +72,20 @@ export const executeNode = (id) => post(`/api/processes/${id}/execute`)
 export const polishPrompt = (id) => post(`/api/processes/${id}/polish`)
 export const detectRegions = (id) => post(`/api/processes/${id}/detect-regions`)
 
+/* 「按参数造图」的节点（如程序化描边圆角框）的**实时预览**：把当前参数发过去，
+   服务端用脚本自己的绘制代码画一张 PNG 回来，**不落盘、不占输出槽位**。
+   参数取本地这份（不是等 500ms 落盘之后再说），否则缩略图会比手上的控件慢半拍。
+   返回的是 blob URL —— 调用方负责在换图或关窗时 URL.revokeObjectURL()。 */
+export const previewNode = async (id, params) => {
+  const r = await fetch(`/api/processes/${id}/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ params: params || {} }),
+  })
+  if (!r.ok) return J(r) // J 会带着服务端的 detail 抛出来
+  return URL.createObjectURL(await r.blob())
+}
+
 export const importImage = async (file, { resourceId = '', x = 0, y = 0 } = {}) => {
   const fd = new FormData()
   fd.append('file', file)

@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import autosize
@@ -28,6 +28,7 @@ import detect as detect_mod
 import engine as engine_mod
 import nodespec
 import polish as polish_mod
+import preview as preview_mod
 import registry as registry_mod
 from workspace import IMAGE_EXTS, CanvasView, Workspace, drop_tree
 
@@ -1744,6 +1745,40 @@ def api_detect_regions(pid: str):
         "imageSize": [W, H],
         "log": log.splitlines()[-8:],
     }
+
+
+@app.post("/api/processes/{pid}/preview")
+def api_process_preview(pid: str, payload: dict):
+    """节点上的**实时预览**缩略图：按参数画一张 PNG 直接吐回来（见 DESIGN.md §3.17）。
+
+    只有 manifest 里带 `preview` 段的脚本才有这个能力（就是那些「按参数造图」的节点）。
+
+    几个刻意的选择：
+
+    - **参数取请求里的那一份**（前端 150ms 防抖后直接发当前值），不是服务端存的那份。
+      `PATCH /api/processes/<id>` 是 500ms 防抖才落盘的，读服务端的会让缩略图慢半拍，
+      还会出现「控件已经变了、图上还是上一版」的错位。
+    - **不写任何状态**：不碰 params、不落盘、不产图片、不占输出槽位。预览就是预览，
+      「改参数不触发重算」这条（R1）不受影响，想看正式结果仍然要点「执行」。
+    - 渲染是纯 CPU 的几十毫秒，`def`（同步）路由由 FastAPI 丢线程池跑，不占事件循环；
+      **不拿 LOCK 渲染** —— 只取一下参数，剩下的活不该堵住别人的请求。
+    """
+    with LOCK:
+        p = engine_mod._process(graph(), pid)  # noqa: SLF001
+        if p is None:
+            raise HTTPException(404, "处理节点不存在")
+        m = STATE["registry"].get(p.get("defId")) or {}
+        spec = m.get("preview") or {}
+        if not spec:
+            raise HTTPException(400, f"{m.get('name') or p.get('defId')} 没有配置实时预览")
+        params = {**(p.get("params") or {}), **((payload or {}).get("params") or {})}
+        entry = Path(m.get("_dir") or "") / (spec.get("script") or m.get("entry") or "")
+
+    try:
+        png = preview_mod.render_png(entry, spec.get("func") or "render", params)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e)) from e
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 # 「格式化所有节点」的撤销快照：**每个画布一份**，一直留到被撤销为止。

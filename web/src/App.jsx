@@ -212,6 +212,10 @@ export default function App() {
   const [canvasPop, setCanvasPop] = useState(null) // 画布控件里开着的弹层：null | 'list' | 'more'
   const [selIds, setSelIds] = useState([]) // 当前选中的节点 id（用于左上角显示尺寸）
   const [viewer, setViewer] = useState(null) // 双击数据节点打开的大图查看器（见 ImageViewer.jsx）
+  // 双击「实时预览缩略图」（程序化描边圆角框那类节点）打开的大图。
+  // 和数据节点共用同一个 ImageViewer，但图是从服务端现画出来的 blob，不在图片池里，
+  // 所以自己揣着 { url, title }，**关窗时负责把 blob 放掉**（谁建的谁释放）。
+  const [iconShot, setIconShot] = useState(null)
   const [editing, setEditing] = useState(null) // 裁剪区域编辑器 { pid, image, regions }
   // 左侧资源面板是否展开（纯界面偏好，记 localStorage，不进 graph.json）
   const [resOpen, setResOpen] = useState(() => {
@@ -729,14 +733,29 @@ export default function App() {
     setEditing({ pid, ...payload })
   }, [])
 
+  // 双击处理节点上的**实时预览缩略图** → 打开大图查看器（同一个窗口）
+  const onPreviewIcon = useCallback((_pid, payload) => {
+    setIconShot((old) => {
+      if (old?.url) URL.revokeObjectURL(old.url) // 连点两次时别把上一张漏在内存里
+      return payload
+    })
+  }, [])
+
+  const closeIconShot = useCallback(() => {
+    setIconShot((old) => {
+      if (old?.url) URL.revokeObjectURL(old.url)
+      return null
+    })
+  }, [])
+
   const cbs = useMemo(
     () => ({
       onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onFillInputs, onPolish,
-      onDetect, onEditRegions,
+      onDetect, onEditRegions, onPreviewIcon,
       onResizeStart,
     }),
     [onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onFillInputs, onPolish,
-     onDetect, onEditRegions, onResizeStart],
+     onDetect, onEditRegions, onPreviewIcon, onResizeStart],
   )
   cbsRef.current = cbs
   stateRef.current = state
@@ -1719,6 +1738,19 @@ export default function App() {
           format={viewer.format}
           alpha={viewer.alpha}
           onClose={() => setViewer(null)}
+        />
+      ) : null}
+
+      {/* 双击处理节点上的实时预览缩略图打开的大图：图在服务端现画，不在图片池里，
+          宽高交给查看器自己读 PNG（脚本会夹取参数，报参数值会跟图上对不上） */}
+      {iconShot ? (
+        <ImageViewer
+          src={iconShot.url}
+          badge="预览"
+          subtitle={iconShot.title}
+          format="PNG"
+          alpha
+          onClose={closeIconShot}
         />
       ) : null}
 
