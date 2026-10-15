@@ -51,6 +51,19 @@ const opts = (spec) =>
 const WCLASS = { grow: 'grow', narrow: 'narrow', full: 'full' }
 const widthCls = (spec) => WCLASS[spec.width] || ''
 
+/* 一个参数格。
+ *
+ * manifest 里写 `"newRow": true` 的参数**另起一行** —— 靠弹性折行做不到：折行取决于前面
+ * 填了多宽、节点又拖了多宽，是「碰巧」；而把字段本身设成 `flex: 1 1 100%`（`width: "full"`）
+ * 虽然一定能换行，却会把**控件一起拉宽**（数字框里就一个「2」，拉满很难看）。
+ * 所以是「外面套一层占满整行的壳，里面还是一个普通宽度的字段」—— 见 styles.css 的 .cfg-brk。
+ */
+function Field({ spec, extra = '', children }) {
+  const cls = `cfg-field nodrag nopan ${widthCls(spec)} ${extra}`.trim()
+  const el = <label className={cls}>{children}</label>
+  return spec.newRow ? <div className="cfg-brk">{el}</div> : el
+}
+
 export default function ProcessNode({ id, data, selected }) {
   const {
     manifest,
@@ -502,12 +515,7 @@ export default function ProcessNode({ id, data, selected }) {
                 // 反过来切回「自动」时提示也回不来。判断只依赖本地的 params。
                 const auto = autoSize && autoSize.key === s.key && !explicit ? autoSize : null
                 return (
-                  <label
-                    className={`cfg-field nodrag nopan ${widthCls(s)}${
-                      auto ? ' col' : ''
-                    }`.trim()}
-                    key={s.key}
-                  >
+                  <Field spec={s} extra={auto ? 'col' : ''} key={s.key}>
                     <span className="cfg-row">
                       <span className="cfg-label">{s.label || s.key}</span>
                       <select
@@ -536,14 +544,14 @@ export default function ProcessNode({ id, data, selected }) {
                         {auto.source === 'input' ? `自动 → ${auto.label}` : '自动 → 模型自选'}
                       </span>
                     ) : null}
-                  </label>
+                  </Field>
                 )
               })}
 
             {others
               .filter((s) => s.type === 'number')
               .map((s) => (
-                <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
+                <Field spec={s} key={s.key}>
                   <span className="cfg-label">{s.label || s.key}</span>
                   <input
                     className="nodrag nopan"
@@ -556,7 +564,7 @@ export default function ProcessNode({ id, data, selected }) {
                     value={params[s.key] ?? ''}
                     onChange={(e) => onParam(id, s.key, e.target.value === '' ? '' : Number(e.target.value))}
                   />
-                </label>
+                </Field>
               ))}
 
             {others
@@ -571,7 +579,7 @@ export default function ProcessNode({ id, data, selected }) {
                   ? Math.min(hi, Math.max(lo, raw))
                   : Number(s.default ?? lo)
                 return (
-                  <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
+                  <Field spec={s} key={s.key}>
                     <span className="cfg-label">{s.label || s.key}</span>
                     <input
                       className="nodrag nopan cfg-slider"
@@ -584,7 +592,7 @@ export default function ProcessNode({ id, data, selected }) {
                     />
                     {/* 读数定宽 + 等宽数字：拖动时整行宽度不会随位数变化而抖 */}
                     <span className="cfg-num">{val > 0 ? `+${val}` : `${val}`}</span>
-                  </label>
+                  </Field>
                 )
               })}
 
@@ -594,7 +602,7 @@ export default function ProcessNode({ id, data, selected }) {
                 // 取色器是自研的（web/src/ColorPicker.jsx）：原生的 <input type="color">
                 // 弹出来的是浏览器自己的浮层，往里加不了输入框。这里只放一个色块当触发器，
                 // 浮层自己 portal 到 body 上（节点在 React Flow 的 transform 里，fixed 会错位）
-                <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
+                <Field spec={s} key={s.key}>
                   <span className="cfg-label">{s.label || s.key}</span>
                   <ColorField
                     value={params[s.key]}
@@ -602,7 +610,7 @@ export default function ProcessNode({ id, data, selected }) {
                     onCommit={(hex) => onParam(id, s.key, hex)}
                     onTip={onToast}
                   />
-                </label>
+                </Field>
               ))}
 
             {others.some((s) => s.type === 'bool') ? (

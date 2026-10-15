@@ -430,6 +430,11 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 .cfg-field.grow { flex: 1 1 190px; }    /* 模型：名字最长，占掉整行剩余宽度 */
 .cfg-field.narrow { flex: 0 0 78px; }   /* 张数：定宽小格 */
 .cfg-field.full { flex: 1 1 100%; }
+/* manifest 里写 `"newRow": true` 的参数：外面套一层**占满整行**的壳（ProcessNode 的 Field）。
+   壳占满整行 → 后面的字段必然从下一行开始；里面的字段仍是普通宽度 → 控件不会被拉宽。
+   （不用 .full：那是给滑块这种「本来就该占满」的控件用的，数字框拉宽很难看。
+     也不用 margin-right: auto —— 它只把后面的项顶到行尾，**不会换行**，实测会挤在同一行。） */
+.cfg-brk { flex: 0 0 100%; display: flex; }
 .cfg-label { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .cfg-field select,
 .cfg-field input {

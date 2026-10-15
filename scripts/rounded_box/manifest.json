@@ -47,7 +47,8 @@
       "min": 0,
       "max": 128,
       "step": 1,
-      "label": "描边"
+      "label": "描边",
+      "newRow": true
     },
     {
       "key": "fillColor",

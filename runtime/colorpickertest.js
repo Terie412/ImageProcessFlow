@@ -294,22 +294,30 @@ async function main() {
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sv.x, y: sv.y, button: 'left', buttons: 1 })
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: sv.x, y: sv.y, button: 'left', buttons: 0, clickCount: 1 })
   await sleep(700)
-  // 红（h=0）取 s=v=50% → (128, 64, 64)
-  check('点色域中间 → 半亮度纯红 #804040', (await paramOf('fillColor')) === '#804040', String(await paramOf('fillColor')))
+  // 色域 / 色相条是按「点击位置相对元素的像素偏移」换算的，圆点落在哪个像素上会带 ±1 的抖动，
+  // 所以这里断言的是**通道关系 + 一位容差**，不钉死 #804040 这种精确值（钉死过一次，布局一动就误报）
+  const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16))
+  const near = (v, want, tol = 6) => Math.abs(v - want) <= tol
+  // 红（h=0）取 s=v=50% → 约 (128, 64, 64)
+  let mid = rgbOf(await paramOf('fillColor'))
+  check('点色域中间 → 半亮度的当前色相（约 128,64,64）',
+        near(mid[0], 128) && near(mid[1], 64) && mid[1] === mid[2], `#${mid.map((v) => v.toString(16)).join('')}`)
   const hue = await centerOf('.color-pop .color-hue') // 中心 = 色相 180°
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: hue.x, y: hue.y, button: 'left', buttons: 1, clickCount: 1 })
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: hue.x, y: hue.y, button: 'left', buttons: 0, clickCount: 1 })
   await sleep(700)
-  // 只换色相、s/v 还是 50% → 青 (64, 128, 128)
-  check('点色相条中间 → 色相到 180°（青）#408080',
-        (await paramOf('fillColor')) === '#408080', String(await paramOf('fillColor')))
+  // 只换色相、s/v 还是 50% → 约 (64, 128, 128)
+  mid = rgbOf(await paramOf('fillColor'))
+  check('点色相条中间 → 色相到 180°（约 64,128,128 的青）',
+        near(mid[1], 128) && near(mid[0], 64) && mid[1] === mid[2], `#${mid.map((v) => v.toString(16)).join('')}`)
   for (let i = 0; i < 20; i++) {
     const s = await shotCenter()
     if (s.loaded && s.center?.[0] === 64 && s.center?.[1] === 128) break
     await sleep(150)
   }
-  check('预览图跟着变成 (64, 128, 128)', (await shotCenter()).center?.join(',') === '64,128,128,255',
-        JSON.stringify((await shotCenter()).center))
+  const c = (await shotCenter()).center || []
+  check('预览图跟着变成同一个青（容差同上）',
+        near(c[1], 128) && near(c[0], 64) && c[1] === c[2], JSON.stringify(c))
 
   console.log('\n[7] 关掉浮层：Esc / 点画布空白 / 再点一次色块')
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })

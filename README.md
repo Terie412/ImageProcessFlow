@@ -180,7 +180,9 @@ start.bat
 ```
 
 - `params[].type`：`text` / `number` / `enum` / `bool` / `color` / `slider`（带 min/max/step）/ `regions`（区域数组 `[{x,y,w,h}]`，原图像素）。
-- `params[].width`：`grow`（吃掉整排剩余宽度）/ `narrow`（定宽小格）/ `full`（独占一排），不写就是普通宽度。
+- `params[].width`：`grow`（吃掉整排剩余宽度）/ `narrow`（定宽小格）/ `full`（**控件自己**占满一排，适合滑块这种本来就该拉宽的），不写就是普通宽度。
+- `params[].newRow`：`true` 表示**这个参数另起一行**。它和 `width` 是两件事：`newRow` 只保证换行、控件保持普通宽度；
+  `width: "full"` 会连控件一起拉宽。折行本身取决于前面填了多少、节点拖了多宽，所以别指望「碰巧排成你想要的样子」。
 - `primary: true` 的参数占节点主体；**不要写 `hint`** —— 低频说明放文档里。
 - **`detect` 段**（可选）声明节点支持「自动识别」以及模型可调的参数，写法见 `scripts/crop/manifest.json`，机制见 `DESIGN.md` §3.8。
 - **`preview` 段**（可选，`{"func": "render"}`）声明这个节点要**实时预览缩略图**，写法见 `scripts/rounded_box/manifest.json`，机制见 `DESIGN.md` §3.17。要它就得在脚本里再暴露一个纯函数 `render(params) -> PIL.Image`，服务端会**直接 import 你的模块**调它 —— 所以 **import 时不能有副作用**（读 stdin、写文件都留在 `if __name__ == "__main__":` 后面）。好处是预览和「执行」产出的图是**同一份代码、逐像素一致**。

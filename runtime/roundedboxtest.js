@@ -257,6 +257,35 @@ async function main() {
         out ? `${out.width}×${out.height} ${out.format}` : '没有产出')
   check('执行后缩略图还在', (await shotPixels([[6, 6]])).present === true)
 
+  console.log('\n[10] 参数排布：宽/高、圆角 X/圆角 Y、描边单独一行、两个颜色一行')
+  const lay = await J(`(() => {
+    const fields = [...document.querySelectorAll(${JSON.stringify(P)} + ' .cfg-field')]
+    const at = (label) => {
+      const f = fields.find((x) => x.querySelector('.cfg-label')?.textContent.trim() === label)
+      if (!f) return null
+      const inp = f.querySelector('input, select')
+      return {
+        top: Math.round(f.getBoundingClientRect().top),
+        left: Math.round(f.getBoundingClientRect().left),
+        fw: Math.round(f.getBoundingClientRect().width),
+        iw: inp ? Math.round(inp.getBoundingClientRect().width) : null,
+      }
+    }
+    return JSON.stringify({ w: at('宽'), h: at('高'), rx: at('圆角 X'), ry: at('圆角 Y'),
+                            sw: at('描边'), fill: at('主体色'), stroke: at('描边色') })
+  })()`)
+  check('宽 / 高 同一行', lay.w?.top === lay.h?.top, `${lay.w?.top} vs ${lay.h?.top}`)
+  check('圆角 X / 圆角 Y 同一行、在宽高下面',
+        lay.rx?.top === lay.ry?.top && lay.rx?.top > lay.w?.top, `${lay.rx?.top} / ${lay.ry?.top}`)
+  check('描边**单独**一行（比圆角那行低）', lay.sw?.top > lay.rx?.top, `${lay.sw?.top} vs ${lay.rx?.top}`)
+  // 比的是**字段**宽度而不是输入框：不同标签本来就不一样长（「描边」比「宽」宽一个字），
+  // 输入框随之不同。要确认的是「换行没有把这个字段撑成整行」
+  check('换行没有把描边那个字段撑宽：和其它字段一样宽',
+        Math.abs(lay.sw?.fw - lay.w?.fw) <= 1, `描边字段 ${lay.sw?.fw} vs 宽字段 ${lay.w?.fw}`)
+  check('主体色 / 描边色 同一行、在描边下面',
+        lay.fill?.top === lay.stroke?.top && lay.fill?.top > lay.sw?.top, `${lay.fill?.top} / ${lay.stroke?.top}`)
+  await snap('layout')
+
   ws.close()
   chrome.kill()
   await post('/api/workspace', { path: origWs })
