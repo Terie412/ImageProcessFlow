@@ -13,6 +13,7 @@
   ⑦ 写操作：新建目录 / 重命名 / 删除（含名字校验、越界、根目录不给动）
   ⑧ info：图片的尺寸 / 格式 / 有没有 alpha（与数据节点同一口径，坏图不 500）
   ⑨ 空串 = 清除资源目录
+  ⑩ reveal：把路径交给文件管理器（这一条把「起文件管理器」换成记录器，不弹窗口）
 
 > 「删除」在测试里把系统回收站换成了假实现（直接删），免得跑一次测试就往真回收站里
 > 丢东西；真机上的回收站那条路见下面注释。
@@ -238,6 +239,32 @@ def run() -> None:
     check("清除后 state 为空串", sp.get("resourceDir") == "")
     check("清除后 list 报 400", expect_http(m.api_list_resourcedir, "") == 400)
     check("清除后 raw 报 400", expect_http(m.api_resourcedir_raw, "a.png") == 400)
+
+    print("=" * 66)
+    print("[10] reveal：在资源管理器里打开 / 选中一项")
+    print("=" * 66)
+    # 别真把窗口弹出来 —— 把「起文件管理器」换成记一笔，只验路由这一层
+    opened: list[str] = []
+    m._open_in_file_manager = lambda p: opened.append(str(p))
+    m.api_set_resourcedir({"path": str(SRC)})
+
+    r = m.api_resourcedir_reveal({"path": "renamed"})
+    check("目录：回 ok 且带上相对路径", r == {"ok": True, "path": "renamed"}, str(r))
+    check("目录：交出去的是它的绝对路径", opened[-1] == str(SRC / "renamed"), opened[-1])
+    m.api_resourcedir_reveal({"path": "a.png"})
+    check("文件：同样交出去（选中与否由文件管理器那层决定）", opened[-1] == str(SRC / "a.png"))
+    m.api_resourcedir_reveal({"path": ""})
+    check("空串 = 资源目录根，也放行", opened[-1] == str(SRC.resolve()), opened[-1])
+    check("不存在的 → 404", expect_http(m.api_resourcedir_reveal, {"path": "nope.txt"}) == 404)
+    check("越界 → 400", expect_http(m.api_resourcedir_reveal, {"path": "../README.md"}) == 400)
+    m.api_set_resourcedir({"path": ""})
+    check("清掉资源目录后 → 400", expect_http(m.api_resourcedir_reveal, {"path": "a.png"}) == 400)
+    # 命令怎么拼（只有 Windows 那条有 /select, 的刁钻写法，值得单独盯一眼）
+    if os.name == "nt":
+        cmd = m._file_manager_command(SRC / "a.png")
+        check("Windows 文件：explorer /select, + 反斜杠路径", cmd[0] == "explorer" and cmd[1].startswith("/select,") and "\\" in cmd[1], str(cmd))
+        cmd = m._file_manager_command(SRC)
+        check("Windows 目录：explorer /select, 也行（选中目录）", cmd[0] == "explorer", str(cmd))
 
     drop_tree(TMP)
 

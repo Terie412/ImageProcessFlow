@@ -108,6 +108,8 @@ export const importFromResource = (path, x, y) =>
 export const mkdirResource = (parent, name) => post('/api/resourcedir/mkdir', { parent, name })
 export const renameResource = (path, name) => post('/api/resourcedir/rename', { path, name })
 export const deleteResource = (path) => post('/api/resourcedir/delete', { path })
+// 在系统文件管理器里打开一项（文件 = 打开所在目录并选中它）—— 服务端只负责把它显示出来
+export const revealResource = (path) => post('/api/resourcedir/reveal', { path })
 // 面板里的缩略图：只读地取资源目录里的原文件，交给浏览器缩放
 export const resourceRawUrl = (path, mtime) =>
   `/api/resourcedir/raw?path=${encodeURIComponent(path || '')}&v=${mtime || 0}`

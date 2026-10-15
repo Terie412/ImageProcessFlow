@@ -147,7 +147,7 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu, onPre
  *
  * - 读取是**懒加载**的：进入只读根目录一层，展开某个子目录时才请求它那一层。
  * - 图片可以**拖到画布**上自动建数据节点（拖 = 复制一份进当前画布的图片池）。
- * - 右键：空白处 / 目录 → 新建目录；目录与文件 → 重命名、删除。
+ * - 右键：空白处 / 目录 → 新建目录；目录与文件 → 在资源管理器中打开、重命名、删除。
  *
  * 资源目录现在**可写**了（新建目录 / 改名 / 删除），但仍然只动它自己里面的东西，
  * 而且**不创建文件**、**删除走回收站**（见 DESIGN.md §3.15）。
@@ -512,6 +512,17 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
               {menu.target.type !== 'blank' ? (
                 <>
                   <div className="ctx-sep" />
+                  <button
+                    className="ctx-item"
+                    onClick={() => {
+                      const t = menu.target
+                      setMenu(null)
+                      // 文件 = 打开它所在的目录并把它选中；目录 = 直接打开这个目录
+                      api.revealResource(t.rel).catch((e) => flash(e.message))
+                    }}
+                  >
+                    在资源管理器中打开
+                  </button>
                   <button
                     className="ctx-item"
                     onClick={() => {

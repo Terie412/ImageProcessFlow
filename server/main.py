@@ -1333,6 +1333,47 @@ def api_resourcedir_delete(payload: dict):
     return {"ok": True, "toTrash": to_trash, **_list_dir(_parent_rel(rel))}
 
 
+def _file_manager_command(target: Path) -> list[str]:
+    """拼出「在系统的文件管理器里显示这个路径」的命令行。
+
+    Windows 单独一条：`explorer` 的参数写法很挑 —— `/select,` 和路径**之间不能有空格**，
+    路径要用**反斜杠**。它对文件是「选中」，对目录是「选中/打开」。
+    macOS 用 `open -R`。Linux 各家文件管理器没有统一的「选中」开关，
+    退而求其次打开文件所在的那一层目录（目录本身就直接打开）。
+    """
+    if os.name == "nt":
+        return ["explorer", "/select," + os.path.normpath(str(target))]
+    if sys.platform == "darwin":
+        return ["open", "-R", str(target)]
+    return ["xdg-open", str(target if target.is_dir() else target.parent)]
+
+
+def _open_in_file_manager(target: Path) -> None:
+    """把路径交给系统的文件管理器显示出来。
+
+    只负责「把它显示出来」—— 不动文件、不改任何东西，资源目录的沙箱纪律不受影响。
+    注意 `explorer` **成功时也返回 1**，所以这里不看返回码、也不等它结束（Popen）。
+    """
+    subprocess.Popen(_file_manager_command(target))  # noqa: S603
+
+
+@app.post("/api/resourcedir/reveal")
+def api_resourcedir_reveal(payload: dict):
+    """在系统文件管理器里打开资源目录里的一项（文件 = 打开它所在的目录并选中它）。
+
+    路径同样走 `_resource_path()` 那道防线；`path=""`（= 资源目录根）也接受。
+    """
+    rel = ((payload or {}).get("path") or "").strip("/")
+    target = _resource_path(rel)
+    if not target.exists():
+        raise HTTPException(404, "目标不存在")
+    try:
+        _open_in_file_manager(target)
+    except Exception as e:  # noqa: BLE001  文件管理器起不来不该带崩请求
+        raise HTTPException(500, f"打不开文件管理器：{e}") from e
+    return {"ok": True, "path": rel}
+
+
 @app.get("/api/resourcedir/raw")
 def api_resourcedir_raw(path: str = ""):
     """只读地取资源目录里的一个文件（面板里的缩略图用）。"""
