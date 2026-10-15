@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
+import ColorField from './ColorPicker'
 import { imageUrl, previewNode } from './api'
 
 const STATUS_TEXT = {
@@ -75,6 +76,8 @@ export default function ProcessNode({ id, data, selected }) {
     onDetect,
     onEditRegions,
     onPreviewIcon,
+    // 画布底部那行临时提示（取色器输入不合法时用它报原因）
+    onToast,
     // 拖手柄时的下限：一律由 App.buildNodes 从服务端的 sizeSpec 带下来，
     // 这里**不留兜底数字** —— 曾经有一份 320×280 从这里和服务端漂移过
     minW,
@@ -587,21 +590,20 @@ export default function ProcessNode({ id, data, selected }) {
 
             {others
               .filter((s) => s.type === 'color')
-              .map((s) => {
-                // 原生取色控件只认 #RRGGBB；历史值不合法时兜成黑，别让 React 报警
-                const val = /^#[0-9a-fA-F]{6}$/.test(params[s.key] || '') ? params[s.key] : '#000000'
-                return (
-                  <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
-                    <span className="cfg-label">{s.label || s.key}</span>
-                    <input
-                      className="nodrag nopan cfg-color"
-                      type="color"
-                      value={val}
-                      onChange={(e) => onParam(id, s.key, e.target.value)}
-                    />
-                  </label>
-                )
-              })}
+              .map((s) => (
+                // 取色器是自研的（web/src/ColorPicker.jsx）：原生的 <input type="color">
+                // 弹出来的是浏览器自己的浮层，往里加不了输入框。这里只放一个色块当触发器，
+                // 浮层自己 portal 到 body 上（节点在 React Flow 的 transform 里，fixed 会错位）
+                <label className={`cfg-field nodrag nopan ${widthCls(s)}`.trim()} key={s.key}>
+                  <span className="cfg-label">{s.label || s.key}</span>
+                  <ColorField
+                    value={params[s.key]}
+                    label={s.label || s.key}
+                    onCommit={(hex) => onParam(id, s.key, hex)}
+                    onTip={onToast}
+                  />
+                </label>
+              ))}
 
             {others.some((s) => s.type === 'bool') ? (
               <div className="cfg-checks">

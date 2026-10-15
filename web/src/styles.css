@@ -446,12 +446,18 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .cfg-field select:focus,
 .cfg-field input:focus { border-color: var(--accent); }
-/* 原生取色控件（单色替换节点的「颜色」参数）：压掉浏览器默认的肥边距 */
-.cfg-field input.cfg-color {
+/* 节点上的色块（自研取色器的触发按钮，见 web/src/ColorPicker.jsx）。
+   原来这里是原生 <input type="color">，后来换成按钮 —— 原生的浮层加不了输入框。
+   颜色靠内联 style 铺在背景上，所以这里不用 background。 */
+.cfg-field .cfg-color {
   flex: 0 0 auto;
-  width: 38px; height: 24px; padding: 2px;
+  width: 38px; height: 24px; padding: 0;
+  border: 1px solid var(--line); border-radius: 5px;
   cursor: pointer;
+  /* 浅色色块贴在深色节点上要有一圈轮廓，不然边界看不出来 */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35);
 }
+.cfg-field .cfg-color:hover { border-color: var(--accent); }
 /* 滑块参数（色彩平衡节点的两条色偏轴）：压掉 .cfg-field input 的输入框外观，
    只留轨道 —— 否则 range 会顶着一个带边框的背景块，很难看 */
 .cfg-field input.cfg-slider {
@@ -596,6 +602,70 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   opacity: 0; transition: opacity .12s; pointer-events: none;
 }
 .icon-shot:hover .icon-hint { opacity: 1; }
+
+/* 画布底部那行临时提示（App.jsx 的 flash）：6 秒后自己消失。
+   两种语气：err（默认，失败）红、info（普通说明，比如「A 被忽略」）中性蓝 —— 
+   把「不是失败」的事也画成红色会让人以为出事了。 */
+.toast {
+  position: absolute; bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  max-width: 640px; padding: 8px 14px;
+  border-radius: 8px; white-space: pre-wrap;
+  font-size: 12px; z-index: 50;
+}
+.toast.err { background: #3a2226; border: 1px solid #7a3436; color: #ffc9c9; }
+.toast.info { background: #1b2430; border: 1px solid #36506b; color: #cfe0f5; }
+
+/* ---------------- 取色器浮层（portal 到 body，见 ColorPicker.jsx） ----------------
+   挂在 body 上、用**视口坐标**：节点在 React Flow 的 transform 里，在里面写
+   position: fixed 会以视口元素为参照系、还跟着缩放被放大。
+   层级压在节点与各种菜单之下、提示条（50）之上不抢 —— 报错提示永远看得见 */
+.color-pop {
+  position: fixed; z-index: 48;
+  width: 228px; padding: 10px;
+  box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+}
+.color-sv {
+  position: relative; border-radius: 6px; cursor: crosshair;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+.color-hue {
+  position: relative; border-radius: 7px; cursor: ew-resize;
+  background: linear-gradient(to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+/* 色域 / 色相条上的圆点：白边 + 深色描边，停在**任意**底色上都看得见 */
+.color-knob {
+  position: absolute; width: 11px; height: 11px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff; border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+  pointer-events: none;
+}
+.color-row { display: flex; align-items: center; gap: 6px; }
+.color-eye {
+  flex: 0 0 auto; width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--text);
+  background: #12141a; border: 1px solid var(--line); border-radius: 5px;
+  cursor: pointer;
+}
+.color-eye:hover { border-color: var(--accent); }
+.color-fld { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.color-lbl { flex: 0 0 auto; width: 34px; color: var(--muted); font-size: 10.5px; }
+.color-pop input {
+  flex: 1 1 auto; min-width: 0; height: 26px;
+  padding: 3px 6px;
+  font: inherit; font-size: 11.5px; color: var(--text);
+  font-variant-numeric: tabular-nums;
+  background: #12141a; border: 1px solid var(--line); border-radius: 5px;
+  outline: none;
+}
+.color-pop input:focus { border-color: var(--accent); }
 
 /* ---------------- 裁剪区域（处理节点的 regions 主体） ---------------- */
 .regions {

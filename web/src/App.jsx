@@ -18,6 +18,13 @@ import ResourcePanel, { RESOURCE_DRAG_MIME } from './ResourcePanel'
 import ImageViewer from './ImageViewer'
 
 const nodeTypes = { resource: ResourceNode, process: ProcessNode }
+const PRO_OPTIONS = { hideAttribution: true }
+const PAN_ON_MIDDLE = [1]
+// 传给 <ReactFlow> 的**对象 / 数组属性必须每次都是同一个引用** —— React Flow 内部有个
+// StoreUpdater，它对 props 做的是「引用比对」：一变就把整份 props 写进它自己的 store。
+// 写成内联字面量（`proOptions={{...}}`、`snapGrid={[a, a]}`）就等于**每次渲染都写一遍 store**，
+// 而 store 一变又会推着界面重渲染 —— 实测把渲染进程顶到 100%（空画布也一样），
+// 菜单、拖动全都跟着发涩。常量能搬出来的就搬出来，跟状态有关的用 useMemo 钉住引用。
 
 /* 节点尺寸：**所有数字都来自服务端**，前端一个都不自己写。
  *
@@ -202,7 +209,8 @@ export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [drawer, setDrawer] = useState(null)
-  const [toast, setToast] = useState(null)
+  const [toast, setToast] = useState(null) // 画布底部那行临时提示 { msg, kind: 'err' | 'info' }
+  const toastTimer = useRef(null)
   const [showWs, setShowWs] = useState(false)
   const [wsInput, setWsInput] = useState('')
   const [wsErr, setWsErr] = useState('')
@@ -244,9 +252,11 @@ export default function App() {
 
   const { screenToFlowPosition, fitView, getZoom, getViewport, setViewport } = useReactFlow()
 
-  const flash = useCallback((msg) => {
-    setToast(String(msg))
-    setTimeout(() => setToast(null), 6000)
+  const flash = useCallback((msg, kind = 'err') => {
+    setToast({ msg: String(msg), kind })
+    // 重新计时：不 clear 的话，上一条的定时器会把这一条提前收走（连点两下就看得见）
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 6000)
   }, [])
 
   /* 画布切换的收尾：恢复目标画布记过的视野。
@@ -751,11 +761,11 @@ export default function App() {
   const cbs = useMemo(
     () => ({
       onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onFillInputs, onPolish,
-      onDetect, onEditRegions, onPreviewIcon,
+      onDetect, onEditRegions, onPreviewIcon, onToast: flash,
       onResizeStart,
     }),
     [onParam, onExecute, onDelete, onReplace, onExport, onOverwrite, onPorts, onRemovePort, onFillInputs, onPolish,
-     onDetect, onEditRegions, onPreviewIcon, onResizeStart],
+     onDetect, onEditRegions, onPreviewIcon, flash, onResizeStart],
   )
   cbsRef.current = cbs
   stateRef.current = state
@@ -969,6 +979,8 @@ export default function App() {
   /* ---- 网格吸附：格大小也是一个失焦才提交的草稿；格点尺寸给 ReactFlow 用 ---- */
   const [gridDraft, setGridDraft] = useState(null)
   const gridSize = clampGrid(state?.settings?.gridSize ?? GRID_DEFAULT) ?? GRID_DEFAULT
+  // 见 nodeTypes 下面那段：不能直接 `snapGrid={[gridSize, gridSize]}`
+  const snapGrid = useMemo(() => [gridSize, gridSize], [gridSize])
 
   const commitGrid = useCallback(
     (raw) => {
@@ -1119,7 +1131,7 @@ export default function App() {
       }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       // 有弹层开着时不吃删除键（否则会把画布上选中的节点删掉）
-      if (document.querySelector('.viewer-mask, .editor-mask, .modal-mask')) return
+      if (document.querySelector('.viewer-mask, .editor-mask, .modal-mask, .color-pop')) return
       // 在输入控件里按键不触发删除
       const t = e.target
       const tag = t && t.tagName ? t.tagName.toLowerCase() : ''
@@ -1500,7 +1512,9 @@ export default function App() {
           onNodeDragStop={onNodeDragStop}
           onSelectionChange={(p) => {
             selectionRef.current = { nodes: p.nodes, edges: p.edges }
-            setSelIds(p.nodes.map((n) => n.id))
+            const ids = p.nodes.map((n) => n.id)
+            // 内容一样就返回**原来那个数组**：否则每选中一次都可能换来一次无谓的重渲染
+            setSelIds((old) => (old.length === ids.length && old.every((v, i) => v === ids[i]) ? old : ids))
           }}
           deleteKeyCode={null}
           onPaneContextMenu={openMenu}
@@ -1514,16 +1528,16 @@ export default function App() {
              - 节点上按住拖动 → 移动节点；拖的是已框选的节点时整组一起动（ReactFlow 内置）
              画布平移只认**中键**（panOnDrag=[1]），左键不再平移。 */
           selectionOnDrag
-          panOnDrag={[1]}
+          panOnDrag={PAN_ON_MIDDLE}
           selectionMode={SelectionMode.Partial}
           /* 网格吸附：拖动时就吸到格点上（服务端在落盘时还会再兜一遍，
              见 DESIGN.md §3.10）。关掉时 snapGrid 不起作用。 */
           snapToGrid={!!state?.settings?.snapToGrid}
-          snapGrid={[gridSize, gridSize]}
+          snapGrid={snapGrid}
           fitView
           minZoom={0.2}
           maxZoom={2}
-          proOptions={{ hideAttribution: true }}
+          proOptions={PRO_OPTIONS}
         >
           <Background color="#2a2f38" gap={20} />
           <Controls />
@@ -1705,26 +1719,9 @@ export default function App() {
         </div>
       ) : null}
 
-      {toast ? (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 16,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: '#3a2226',
-            border: '1px solid #7a3436',
-            color: '#ffc9c9',
-            padding: '8px 14px',
-            borderRadius: 8,
-            maxWidth: 640,
-            whiteSpace: 'pre-wrap',
-            zIndex: 50,
-          }}
-        >
-          {toast}
-        </div>
-      ) : null}
+      {/* 画布底部那行临时提示：报错（默认）是红的，普通说明是中性色 ——
+          例如「A 被忽略」不是失败，不该长成一副报错的样子 */}
+      {toast ? <div className={`toast ${toast.kind === 'info' ? 'info' : 'err'}`}>{toast.msg}</div> : null}
 
       {/* 双击数据节点打开的大图查看器（本体在 ImageViewer.jsx；资源面板里的图片文件双击也用它） */}
       {viewer ? (
