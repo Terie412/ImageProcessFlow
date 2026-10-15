@@ -1,4 +1,4 @@
-// 验证自研取色器：色块弹出 / hex 与 RGBA 互相同步 / 失败在画布底部弹提示 / 拖色域与色相条 /
+// 验证自研取色器：色块弹出 / hex 与 RGB 互相同步 / 失败在画布底部弹提示 / 拖色域与色相条 /
 // 关掉浮层的几种方式 / 改色真的落到参数与预览上。
 // 纯本地：不起模型、不花任何 API 钱。全程在一次性临时工作目录里跑，不碰用户的真实画布。
 import { spawn } from 'node:child_process'
@@ -83,6 +83,15 @@ async function main() {
   await new Promise((r) => (ws.onopen = r))
   await send('Page.enable')
   await send('Runtime.enable')
+  await send('Network.enable')
+  const patches = [] // 每一次 PATCH /api/processes/<id> 的请求体 */
+  ws.addEventListener('message', (ev) => {
+    const m = JSON.parse(ev.data)
+    if (m.method === 'Network.requestWillBeSent') {
+      const r = m.params.request
+      if (r.method === 'PATCH' && r.url.includes('/api/processes/')) patches.push(r.postData || '')
+    }
+  })
   const evalJs = async (expr) =>
     (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result.value
   const J = async (expr) => JSON.parse(await evalJs(expr))
@@ -104,7 +113,7 @@ async function main() {
     await click(p.x, p.y)
   }
 
-  // 浮层里那两个输入框：0 = HEX、1 = RGBA
+  // 浮层里那两个输入框：0 = HEX、1 = RGB
   const fields = async () =>
     J(`(() => {
       const pop = document.querySelector('.color-pop')
@@ -113,7 +122,7 @@ async function main() {
       return JSON.stringify({
         open: true,
         hex: ins[0] ? ins[0].value : null,
-        rgba: ins[1] ? ins[1].value : null,
+        rgb: ins[1] ? ins[1].value : null,
         left: Math.round(pop.getBoundingClientRect().left),
         top: Math.round(pop.getBoundingClientRect().top),
       })
@@ -153,7 +162,7 @@ async function main() {
   const toastText = async () =>
     evalJs(`(() => {
       const t = document.querySelector('.toast')
-      return t ? (t.className.replace('toast ', '') + '｜' + t.textContent) : ''
+      return t ? t.textContent : ''
     })()`)
 
   // 缩略图中心那个像素（改色最终要落到图上才算数）
@@ -174,21 +183,52 @@ async function main() {
     return s.graph.processes.find((p) => p.id === pid)?.params?.[key]
   }
 
+  // 无头 Chrome 没有 EyeDropper（浏览器自带 API），吸管按钮就不渲染 —— 注一个假的进去，
+  // 这样按钮的**位置**和**点了之后取到什么**都能验。（真窗口里用的是真的那个）
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `window.EyeDropper = class { open() { return Promise.resolve({ sRGBHex: '#123456' }) } }`,
+  })
   await send('Page.navigate', { url: BASE })
   await sleep(1800)
 
+  /* 打开某个标签那一行的取色器，并**确认浮层就是它那一行的**：
+     ① 先用 Esc 把可能开着的浮层收掉 —— `b.click()` 是程序化点击，不派发 mousedown，
+        而「点外面收起」认的是 mousedown，于是会出现两个浮层同时开着、querySelector
+        拿到前面那一个的坑（真鼠标点不会：mousedown 会先把另一个收掉）。
+     ② 打开后拿浮层和色块的位置对一下：浮层就该贴在色块下方，确认关联没串。 */
   const openField = async (label) => {
-    // 按标签找到那一行的色块，派真实 click（React 的 onClick 才认）
-    const clicked = await evalJs(`(() => {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await sleep(150)
+    const box = await J(`(() => {
       const f = [...document.querySelectorAll(${JSON.stringify(P)} + ' .cfg-field')]
         .find((x) => x.querySelector('.cfg-label')?.textContent.trim() === ${JSON.stringify(label)})
       const b = f && f.querySelector('.cfg-color')
-      if (!b) return false
-      b.click()
+      if (!b) return 'null'
+      const r = b.getBoundingClientRect()
+      return JSON.stringify({ l: Math.round(r.left), t: Math.round(r.top), b: Math.round(r.bottom) })
+    })()`)
+    if (!box) throw new Error(`找不到色块：${label}`)
+    await evalJs(`(() => {
+      const f = [...document.querySelectorAll(${JSON.stringify(P)} + ' .cfg-field')]
+        .find((x) => x.querySelector('.cfg-label')?.textContent.trim() === ${JSON.stringify(label)})
+      f.querySelector('.cfg-color').click()
       return true
     })()`)
-    if (!clicked) throw new Error(`找不到色块：${label}`)
-    await sleep(200)
+    await sleep(220)
+    const pop = await J(`(() => {
+      const p = document.querySelector('.color-pop')
+      if (!p) return 'null'
+      const r = p.getBoundingClientRect()
+      return JSON.stringify({ l: Math.round(r.left), t: Math.round(r.top), h: Math.round(r.height) })
+    })()`)
+    if (!pop) throw new Error(`打开 ${label} 的取色器失败`)
+    // 贴着色块下方；窗口底下放不下时会翻到色块上方 —— 两种都算对上
+    const below = Math.abs(pop.t - box.b - 6) <= 1
+    const above = Math.abs(box.t - (pop.t + pop.h) - 6) <= 1
+    if (Math.abs(pop.l - box.l) > 1 || !(below || above)) {
+      throw new Error(`开着的浮层不是「${label}」那一行的：浮层 ${pop.l},${pop.t} vs 色块 ${box.l},${box.b}`)
+    }
   }
 
   console.log('\n[1] 点色块 → 弹出取色器，两个框显示当前值')
@@ -196,17 +236,17 @@ async function main() {
   let f = await fields()
   check('浮层打开了', f.open === true)
   check('HEX 显示当前值 #ffffff', f.hex === '#ffffff', String(f.hex))
-  check('RGBA 显示 255, 255, 255, 255', f.rgba === '255, 255, 255, 255', String(f.rgba))
+  check('RGB 显示 255, 255, 255', f.rgb === '255, 255, 255', String(f.rgb))
   check('是挂在 body 上的 fixed 浮层（节点在 transform 里，fixed 才算得准）',
         (await evalJs(`getComputedStyle(document.querySelector('.color-pop')).position`)) === 'fixed')
   await snap('picker')
   await snap('picker')
 
-  console.log('\n[2] 改十六进制 → RGBA 同步跟着变，并落到参数与预览图上')
+  console.log('\n[2] 改十六进制 → RGB 同步跟着变，并落到参数与预览图上')
   await typeAndEnter(0, 'ff8800') // 故意不带 #：井号可有可无
   f = await fields()
   check('HEX 补上井号：#ff8800', f.hex === '#ff8800', String(f.hex))
-  check('RGBA 同步成 255, 136, 0, 255', f.rgba === '255, 136, 0, 255', String(f.rgba))
+  check('RGB 同步成 255, 136, 0', f.rgb === '255, 136, 0', String(f.rgb))
   await sleep(700) // 参数落盘走 500ms 防抖
   check('节点参数已变成 #ff8800', (await paramOf('fillColor')) === '#ff8800', String(await paramOf('fillColor')))
   for (let i = 0; i < 20; i++) {
@@ -217,28 +257,22 @@ async function main() {
   const s2 = await shotCenter()
   check('预览图中心变成 (255, 136, 0)', s2.center?.join(',') === '255,136,0,255', JSON.stringify(s2.center))
 
-  console.log('\n[3] 改 RGBA → 十六进制同步跟着变（空项自动丢掉）')
-  await typeAndEnter(1, '0, 128, , 255, ') // 手抖：中间空一格、末尾多一个逗号
+  console.log('\n[3] 改 RGB → 十六进制同步跟着变（空项自动丢掉）')
+  await typeAndEnter(1, '0, 128, , 200, ') // 手抖：中间空一格、末尾多一个逗号
   f = await fields()
-  check('RGBA 归一成 0, 128, 255, 255', f.rgba === '0, 128, 255, 255', String(f.rgba))
-  check('HEX 同步成 #0080ff', f.hex === '#0080ff', String(f.hex))
-
-  console.log('\n[4] 带 A 的 RGBA：颜色按前三个存，A 用一条普通提示说明被忽略')
-  await typeAndEnter(1, '16, 32, 48, 128')
-  check('HEX 取前三位 #102030', (await fields()).hex === '#102030', String((await fields()).hex))
-  const tA = await toastText()
-  check('提示说明 A 被忽略', tA.includes('info') && tA.includes('A'), tA)
-  check('RGBA 框回到 255（存不下透明，不装作存了）', (await fields()).rgba === '16, 32, 48, 255',
-        String((await fields()).rgba))
+  check('RGB 归一成 0, 128, 200', f.rgb === '0, 128, 200', String(f.rgb))
+  check('HEX 同步成 #0080c8', f.hex === '#0080c8', String(f.hex))
 
   console.log('\n[5] 各种失败：值不动、原文留着、画布底部弹出原因')
   await sleep(700) // 参数落盘走 500ms 防抖，等它落定再取「改之前」的值
   const before = await paramOf('fillColor')
   const fails = [
-    [0, '#12345', '3、6 或 8 位'],
+    [0, '#12345', '3 或 6 位'],
     [0, '#12zz45', '不是 0-9a-f'],
     [0, '   ', '不能是空的'],
-    [1, '1, 2', '要 3 个'],
+    [0, '#ff8800ff', '不支持透明'],   // 8 位 hex：带 alpha，这个参数存不下
+    [1, '1, 2', '要 3 个数'],
+    [1, '16, 32, 48, 128', '把最后的 A 去掉'], // 4 个数：同上
     [1, '300, 0, 0', '收到 300'],
     [1, 'a, 0, 0', '不是数字'],
     [1, '-1, 0, 0', '收到 -1'],
@@ -246,12 +280,12 @@ async function main() {
   for (const [idx, text, want] of fails) {
     await typeAndEnter(idx, text)
     const t = await toastText()
-    check(`「${text}」被挡下且说明了原因`, t.includes('err') && t.includes(want), t || '(没有提示)')
+    check(`「${text}」被挡下且说明了原因`, t.includes(want), t || '(没有提示)')
   }
   await snap('reject') // 顺手截一张「被挡下 + 底部提示」
   await snap('reject') // 顺手截一张「被挡下 + 底部提示」
   check('连续失败后参数一个都没变', (await paramOf('fillColor')) === before, String(await paramOf('fillColor')))
-  check('失败时输入框保留原文（好接着改）', (await fields()).rgba.includes('-1, 0, 0'), (await fields()).rgba)
+  check('失败时输入框保留原文（好接着改）', (await fields()).rgb.includes('-1, 0, 0'), (await fields()).rgb)
 
   console.log('\n[6] 拖色域 / 色相条：颜色跟着变，预览图跟着重画')
   await typeAndEnter(0, '#ff0000') // 先定成纯红，色相条停在 0°
@@ -298,6 +332,39 @@ async function main() {
   await sleep(700)
   check('描边色改成 #00ff88', (await paramOf('strokeColor')) === '#00ff88', String(await paramOf('strokeColor')))
   check('主体色没被带着动', (await paramOf('fillColor')) === keep, String(await paramOf('fillColor')))
+
+  console.log('\n[9] 吸管按钮：在 HEX / RGB 的右侧、跨两行，点了就把取到的颜色填进来')
+  await openField('主体色')
+  const layout = await J(`(() => {
+    const pop = document.querySelector('.color-pop')
+    const eye = pop.querySelector('.color-eye')
+    const ins = pop.querySelectorAll('input')
+    const r = (el) => { const b = el.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width), h: Math.round(b.height), t: Math.round(b.top), b: Math.round(b.bottom) } }
+    return JSON.stringify({ eye: eye ? r(eye) : null, hex: r(ins[0]), rgb: r(ins[1]), pop: r(pop) })
+  })()`)
+  check('吸管按钮渲染出来了', !!layout.eye, JSON.stringify(layout.eye))
+  check('它在两个输入框的右边（右列）', layout.eye && layout.eye.l >= layout.hex.r - 1, `eye.left=${layout.eye?.l} hex.right=${layout.hex.r}`)
+  check('HEX / RGB 左边界对齐（一列）', layout.hex.l === layout.rgb.l, `${layout.hex.l} / ${layout.rgb.l}`)
+  check('吸管跨两行（比一行高，约等于两行加行距）',
+        layout.eye && layout.eye.h > layout.hex.h && layout.eye.h >= layout.hex.h + layout.rgb.h,
+        `eye.h=${layout.eye?.h} hex.h=${layout.hex.h} rgb.h=${layout.rgb.h}`)
+  check('吸管贴着浮层右边', layout.eye && Math.abs(layout.eye.r - (layout.pop.r - 10)) <= 1, `${layout.eye?.r} vs ${layout.pop.r}`)
+  const eyePt = await centerOf('.color-pop .color-eye')
+  await click(eyePt.x, eyePt.y)
+  await sleep(700)
+  // 参数落盘走 500ms 防抖，轮询等它落定（一次 sleep 卡在边界上会误报）
+  let got = null
+  for (let i = 0; i < 20; i++) {
+    got = await paramOf('fillColor')
+    if (got === '#123456') break
+    await sleep(200)
+  }
+  check('点吸管 → 颜色变成它取到的 #123456', got === '#123456', String(got))
+  f = await fields()
+  check('两个框同步显示 18, 52, 86', f.hex === '#123456' && f.rgb === '18, 52, 86', `${f.hex} / ${f.rgb}`)
+  await snap('layout')
+  console.log('  本次跑过的 PATCH：')
+  for (const b of patches) console.log('   ', b)
 
   ws.close()
   chrome.kill()

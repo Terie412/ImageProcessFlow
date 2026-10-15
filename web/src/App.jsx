@@ -209,7 +209,7 @@ export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [drawer, setDrawer] = useState(null)
-  const [toast, setToast] = useState(null) // 画布底部那行临时提示 { msg, kind: 'err' | 'info' }
+  const [toast, setToast] = useState(null) // 画布底部那行临时提示（6 秒后自己消失）
   const toastTimer = useRef(null)
   const [showWs, setShowWs] = useState(false)
   const [wsInput, setWsInput] = useState('')
@@ -252,8 +252,8 @@ export default function App() {
 
   const { screenToFlowPosition, fitView, getZoom, getViewport, setViewport } = useReactFlow()
 
-  const flash = useCallback((msg, kind = 'err') => {
-    setToast({ msg: String(msg), kind })
+  const flash = useCallback((msg) => {
+    setToast(String(msg))
     // 重新计时：不 clear 的话，上一条的定时器会把这一条提前收走（连点两下就看得见）
     clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(null), 6000)
@@ -1719,9 +1719,8 @@ export default function App() {
         </div>
       ) : null}
 
-      {/* 画布底部那行临时提示：报错（默认）是红的，普通说明是中性色 ——
-          例如「A 被忽略」不是失败，不该长成一副报错的样子 */}
-      {toast ? <div className={`toast ${toast.kind === 'info' ? 'info' : 'err'}`}>{toast.msg}</div> : null}
+      {/* 画布底部那行临时提示（取色器输入不合法之类） */}
+      {toast ? <div className="toast">{toast}</div> : null}
 
       {/* 双击数据节点打开的大图查看器（本体在 ImageViewer.jsx；资源面板里的图片文件双击也用它） */}
       {viewer ? (

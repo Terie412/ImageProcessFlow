@@ -1,12 +1,12 @@
 /* 颜色的解析与换算：取色器的两个文本框、色域面板、色相条共用这一份。
  *
- * 为什么抽出来：`#RRGGBB` 和 `R, G, B, A` 两种写法**互相同步**，解析一散就必然出现
- * 「hex 框认、RGBA 框不认」这种不一致；而且失败时要能**说清为什么失败**，
+ * 为什么抽出来：`#RRGGBB` 和 `R, G, B` 两种写法**互相同步**，解析一散就必然出现
+ * 「hex 框认、RGB 框不认」这种不一致；而且失败时要能**说清为什么失败**，
  * 所以解析函数一律返回 `{ ok: false, err }` 而不是 null / 抛异常。
  *
  * 一条口径（2026-10-15 定）：颜色参数存的是 `#RRGGBB`，**不支持透明**。
- * 所以 RGBA 写法里的 A（以及 8 位 hex 的后两位）只做校验、**不参与存储** ——
- * 输入 A≠255 时返回 `alphaIgnored`，由调用方决定要不要提一句（别静默吞掉）。
+ * 因此带 alpha 的写法（`#RRGGBBAA`、`R, G, B, A`）**不是「接受但忽略」，而是直接报错** ——
+ * 接受了再把它丢掉，用户会以为透明度设上了（同一件事，两种写法得给同一个答案）。
  */
 
 /** `[r,g,b]` → `#rrggbb`（小写、带 #） */
@@ -20,17 +20,17 @@ export function hexToRgb(hex) {
   return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)]
 }
 
-/** 存下来的值 → 文本框里那串 `r, g, b, 255` */
-export const toRgbaText = (hex) => {
+/** 存下来的值 → 文本框里那串 `r, g, b` */
+export const toRgbText = (hex) => {
   const rgb = hexToRgb(hex)
-  return rgb ? `${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 255` : ''
+  return rgb ? `${rgb[0]}, ${rgb[1]}, ${rgb[2]}` : ''
 }
 
 /**
  * 解析十六进制写法。允许：
  *   - 前面带不带 `#`、带几个都行；大小写随意
- *   - 3 位（`#abc` → `#aabbcc`）、6 位、8 位（**后两位当 alpha，只校验不存**）
- * 返回 `{ ok: true, rgb, alphaIgnored }` 或 `{ ok: false, err }`（err 是给用户看的一句话）。
+ *   - 3 位（`#abc` → `#aabbcc`）、6 位
+ *   - **8 位不行**（后两位是 alpha，这个参数存不下）→ 报错让他去掉
  */
 export function parseHex(text) {
   const raw = String(text ?? '').trim()
@@ -42,48 +42,42 @@ export function parseHex(text) {
   }
   if (s.length === 3) {
     const [r, g, b] = [...s].map((c) => parseInt(c + c, 16))
-    return { ok: true, rgb: [r, g, b], alphaIgnored: false }
+    return { ok: true, rgb: [r, g, b] }
   }
   if (s.length === 6) {
     return {
       ok: true,
       rgb: [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)],
-      alphaIgnored: false,
     }
   }
   if (s.length === 8) {
-    return {
-      ok: true,
-      rgb: [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)],
-      // 后两位是 alpha：这个参数存不下它，所以只在它不是 ff 时提醒一句
-      alphaIgnored: s.slice(6, 8) !== 'ff',
-    }
+    return { ok: false, err: `颜色不支持透明：8 位十六进制（${raw}）的后两位是 alpha，去掉它只留 6 位` }
   }
-  return {
-    ok: false,
-    err: `十六进制要 3、6 或 8 位（收到 ${s.length} 位：${raw}）`,
-  }
+  return { ok: false, err: `十六进制要 3 或 6 位（收到 ${s.length} 位：${raw}）` }
 }
 
 /**
- * 解析 `R, G, B[, A]` 写法。
- *   - 逗号分隔；**先去掉空项**（`17,,17,17` / `17, 17, 17,` 这类手抖都算数）
- *   - 3 或 4 项；4 项时 A 只校验不存（同上，返回 `alphaIgnored`）
+ * 解析 `R, G, B` 写法。
+ *   - 逗号分隔；**先去掉空项**（`17,,17,17`、`17, 17, 17,` 这类手抖都算数）
+ *   - **正好 3 项**；写成 4 项（多一个 A）直接报错 —— 同上，这个参数没有透明度
  *   - 每项 0~255，可以带小数（四舍五入）
  */
-export function parseRgba(text) {
+export function parseRgb(text) {
   const raw = String(text ?? '').trim()
-  if (!raw) return { ok: false, err: 'RGBA 不能是空的' }
+  if (!raw) return { ok: false, err: 'RGB 不能是空的' }
   const parts = raw.split(',').map((s) => s.trim()).filter((s) => s !== '') // 空项直接丢掉
-  if (parts.length !== 3 && parts.length !== 4) {
+  if (parts.length !== 3) {
     return {
       ok: false,
-      err: `RGBA 要 3 个（R, G, B）或 4 个数（R, G, B, A），逗号分隔 —— 收到 ${parts.length} 个：${raw}`,
+      err:
+        parts.length === 4
+          ? `颜色不支持透明：RGB 只要 3 个数（R, G, B），把最后的 A 去掉（收到 ${raw}）`
+          : `RGB 要 3 个数（R, G, B），逗号分隔 —— 收到 ${parts.length} 个：${raw}`,
     }
   }
-  const names = ['R', 'G', 'B', 'A']
+  const names = ['R', 'G', 'B']
   const nums = []
-  for (let i = 0; i < parts.length; i++) {
+  for (let i = 0; i < 3; i++) {
     if (!/^-?\d+(\.\d+)?$/.test(parts[i])) {
       return { ok: false, err: `${names[i]} 不是数字：「${parts[i]}」（收到 ${raw}）` }
     }
@@ -93,11 +87,7 @@ export function parseRgba(text) {
     }
     nums.push(Math.round(v))
   }
-  return {
-    ok: true,
-    rgb: nums.slice(0, 3),
-    alphaIgnored: nums.length === 4 && nums[3] !== 255,
-  }
+  return { ok: true, rgb: nums }
 }
 
 /** `[r,g,b]`（0~255）→ `{h: 0~360, s: 0~1, v: 0~1}` */

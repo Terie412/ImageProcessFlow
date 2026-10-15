@@ -603,18 +603,15 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .icon-shot:hover .icon-hint { opacity: 1; }
 
-/* 画布底部那行临时提示（App.jsx 的 flash）：6 秒后自己消失。
-   两种语气：err（默认，失败）红、info（普通说明，比如「A 被忽略」）中性蓝 —— 
-   把「不是失败」的事也画成红色会让人以为出事了。 */
+/* 画布底部那行临时提示（App.jsx 的 flash）：说清楚**为什么**失败，6 秒后自己消失 */
 .toast {
   position: absolute; bottom: 16px; left: 50%;
   transform: translateX(-50%);
   max-width: 640px; padding: 8px 14px;
   border-radius: 8px; white-space: pre-wrap;
   font-size: 12px; z-index: 50;
+  background: #3a2226; border: 1px solid #7a3436; color: #ffc9c9;
 }
-.toast.err { background: #3a2226; border: 1px solid #7a3436; color: #ffc9c9; }
-.toast.info { background: #1b2430; border: 1px solid #36506b; color: #cfe0f5; }
 
 /* ---------------- 取色器浮层（portal 到 body，见 ColorPicker.jsx） ----------------
    挂在 body 上、用**视口坐标**：节点在 React Flow 的 transform 里，在里面写
@@ -646,16 +643,26 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
   pointer-events: none;
 }
-.color-row { display: flex; align-items: center; gap: 6px; }
+/* 两个输入框一列、吸管一列：左列 HEX 在上 RGB 在下，右列吸管**跨两行**撑满。
+   右列宽度用 auto —— 吸管没有（浏览器不支持 EyeDropper）时那一列自然收成 0，
+   输入框不会被留出一个空档 */
+.color-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
 .color-eye {
-  flex: 0 0 auto; width: 26px; height: 26px;
+  grid-row: span 2;
+  align-self: stretch;
+  width: 26px;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; color: var(--text);
   background: #12141a; border: 1px solid var(--line); border-radius: 5px;
   cursor: pointer;
 }
 .color-eye:hover { border-color: var(--accent); }
-.color-fld { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.color-fld { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .color-lbl { flex: 0 0 auto; width: 34px; color: var(--muted); font-size: 10.5px; }
 .color-pop input {
   flex: 1 1 auto; min-width: 0; height: 26px;

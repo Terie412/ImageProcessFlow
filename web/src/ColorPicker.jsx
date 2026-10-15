@@ -1,11 +1,15 @@
-/* 自研取色器：点节点上的色块弹出，色域 + 色相条 + **两个纯文本输入框**（十六进制 / RGBA）。
+/* 自研取色器：点节点上的色块弹出，色域 + 色相条 + **两个纯文本输入框**（十六进制 / RGB）。
  *
  * 为什么要自研：原先用的是 `<input type="color">`，弹出来的是**浏览器原生取色器** ——
  * 它的 DOM 我们碰不到，往里加输入框是不可能的（能看到、能点，但不受我们控制）。
- * 需求是「同一个框里既能打 hex 又能打 RGBA」，所以只能自己画一个。
+ * 需求是「同一个框里既能打 hex 又能打 RGB」，所以只能自己画一个。
  *
  * 两个文本框的规矩（见 `color.js`）：成功才同步另一侧；失败不动值、只把**原因**
  * 交给 `onTip`（画布底部那行临时提示），用户输入的原文留着方便改。
+ * 颜色参数**没有透明度**，所以标签是 `RGB` 而不是 `RGBA`，带 alpha 的写法
+ * （4 个数 / 8 位 hex）一律报错，不做「收了但丢掉」。
+ *
+ * 布局：左列两个输入框上下排，右列一个吸管按钮（跨两行）—— 见 `.color-grid`。
  *
  * 定位：节点在 React Flow 的 transform 里，**里面写 position: fixed 会以视口元素为
  * 参照系**（还会跟着缩放一起被放大）。所以浮层用 portal 挂到 body 上、自己量锚点的
@@ -15,7 +19,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useViewport } from '@xyflow/react'
-import { hexToRgb, hsvToRgb, parseHex, parseRgba, rgbToHex, rgbToHsv, toRgbaText } from './color'
+import { hexToRgb, hsvToRgb, parseHex, parseRgb, rgbToHex, rgbToHsv, toRgbText } from './color'
 
 const SV_W = 208
 const SV_H = 128
@@ -39,7 +43,7 @@ export default function ColorField({ value, label, onCommit, onTip }) {
         type="button"
         className="nodrag nopan cfg-color"
         style={{ background: v }}
-        title={`${label}：${v} —— 点开取色器，也可以直接输入 #RRGGBB 或 R, G, B, A`}
+        title={`${label}：${v} —— 点开取色器，也可以直接输入 #RRGGBB 或 R, G, B`}
         onClick={() => setOpen((o) => !o)}
       />
       {open ? (
@@ -66,7 +70,7 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
   const [pos, setPos] = useState(null)
   const [hsv, setHsv] = useState(() => rgbToHsv(hexToRgb(value) || [0, 0, 0]))
   const [hexText, setHexText] = useState(value)
-  const [rgbaText, setRgbaText] = useState(toRgbaText(value))
+  const [rgbText, setRgbText] = useState(toRgbText(value))
   hsvRef.current = hsv
 
   /* onClose 每次渲染都是新的函数，用 ref 兜住，两个监听都只挂**一次**。
@@ -90,7 +94,7 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
       })
     }
     setHexText(value)
-    setRgbaText(toRgbaText(value))
+    setRgbText(toRgbText(value))
   }, [value])
 
   /* 位置：先量锚点、再按浮层实际尺寸夹进窗口（右下角就往上翻）。
@@ -128,16 +132,15 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  /* 统一入口：本地状态与外部值一起更新。`alphaIgnored` 指输入里带了透明（A≠255），
-     这个参数存不下 —— **不当失败处理**，但也不静默丢，用一条普通提示说清楚。 */
-  const applyRgb = (rgb, alphaIgnored) => {
-    if (alphaIgnored) onTip('颜色参数不支持透明：A 被忽略，按不透明存', 'info')
+  /* 统一入口：本地状态与外部值一起更新。传进来的必定是合法颜色
+     （不合法的在 commitHex / commitRgb 那层就挡下并报原因了）。 */
+  const applyRgb = (rgb) => {
     const hex = rgbToHex(rgb)
     const next = rgbToHsv(rgb)
     hsvRef.current = next
     setHsv(next)
     setHexText(hex)
-    setRgbaText(toRgbaText(hex))
+    setRgbText(toRgbText(hex))
     onCommit(hex)
   }
 
@@ -182,12 +185,12 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
   const commitHex = () => {
     const r = parseHex(hexText)
     if (!r.ok) return onTip(r.err) // 值不动、原文留着，让人接着改
-    applyRgb(r.rgb, r.alphaIgnored)
+    applyRgb(r.rgb)
   }
-  const commitRgba = () => {
-    const r = parseRgba(rgbaText)
+  const commitRgb = () => {
+    const r = parseRgb(rgbText)
     if (!r.ok) return onTip(r.err)
-    applyRgb(r.rgb, r.alphaIgnored)
+    applyRgb(r.rgb)
   }
   // 回车即提交；失焦也提交（但点浮层里的别处失焦时，浮层还在，不影响）
   const onKeyDown = (commit) => (e) => {
@@ -201,7 +204,7 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
     try {
       const res = await new window.EyeDropper().open()
       const r = parseHex(res?.sRGBHex || '')
-      if (r.ok) applyRgb(r.rgb, false)
+      if (r.ok) applyRgb(r.rgb)
     } catch { /* 用户按 Esc 取消：什么都不做 */ }
   }
 
@@ -241,12 +244,8 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
         <span className="color-knob" style={{ left: (hue / 360) * SV_W, top: HUE_H / 2 }} />
       </div>
 
-      <div className="color-row">
-        {canPick ? (
-          <button type="button" className="color-eye" title="在屏幕上吸一个颜色" onClick={pickScreen}>
-            ⌖
-          </button>
-        ) : null}
+      {/* 左列两个输入框上下排，右列吸管（跨两行）—— 见 styles.css 的 .color-grid */}
+      <div className="color-grid">
         <label className="color-fld">
           <span className="color-lbl">HEX</span>
           <input
@@ -259,20 +258,26 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
             onKeyDown={onKeyDown(commitHex)}
           />
         </label>
-      </div>
 
-      <label className="color-fld">
-        <span className="color-lbl">RGBA</span>
-        <input
-          className="nodrag"
-          value={rgbaText}
-          spellCheck={false}
-          placeholder="255, 136, 0, 255"
-          onChange={(e) => setRgbaText(e.target.value)}
-          onBlur={commitRgba}
-          onKeyDown={onKeyDown(commitRgba)}
-        />
-      </label>
+        {canPick ? (
+          <button type="button" className="color-eye" title="在屏幕上吸一个颜色" onClick={pickScreen}>
+            ⌖
+          </button>
+        ) : null}
+
+        <label className="color-fld">
+          <span className="color-lbl">RGB</span>
+          <input
+            className="nodrag"
+            value={rgbText}
+            spellCheck={false}
+            placeholder="255, 136, 0"
+            onChange={(e) => setRgbText(e.target.value)}
+            onBlur={commitRgb}
+            onKeyDown={onKeyDown(commitRgb)}
+          />
+        </label>
+      </div>
     </div>,
     document.body,
   )
