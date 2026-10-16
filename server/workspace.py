@@ -11,7 +11,7 @@
 存储布局（v2）::
 
     <工作目录>/
-    ├─ graph.json            画布容器：{version:2, current, canvases:[{id,name,viewport,…}]}
+    ├─ graph.json            画布容器：{version:2, current, resourceDir, colors, canvases:[…]}
     ├─ canvases/<画布id>/images/A.png     每个画布自己的图片池
     ├─ .tmp/  .trash/        临时目录与删除中转站（两个画布共用，内容都是瞬态的）
 
@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import string
 import uuid
@@ -99,6 +100,69 @@ def _name_sequence():
         n += 1
 
 
+# ---------------- 颜色库（文档级字段 `colors`） ----------------
+# 一个颜色就是「名字 + 值」。值是**唯一一种写法**：`#rrggbb`（小写、带 #）——
+# 和取色器 / 节点颜色参数同一条口径（见 web/src/color.js）：**不支持透明**，
+# 所以 8 位十六进制一律拒绝，不做「收了但把 alpha 丢掉」。
+#
+# 为什么是文档级（跟随工作目录）而不是应用设置：一套配色是**这个项目**的资产，
+# 理由和 `resourceDir` 一样（见 DESIGN.md §3.20）。每个画布共用同一份 ——
+# 它是「参考」不是画布内容，切画布不该换一套颜色。
+COLOR_NAME_MAX = 60
+COLOR_HEX_RE = re.compile(r"^[0-9a-f]{6}$")
+
+
+def normalize_color_name(name) -> str:
+    """名字：去掉首尾空白、把内部的连续空白（含换行）压成一个空格。
+
+    配色名常常是从设计稿 / 群里粘过来的，带换行的话会把列表那一行撑成两行。
+    """
+    return " ".join(str(name or "").split())
+
+
+def normalize_color_value(value) -> str | None:
+    """任意手写写法 → 小写 `#rrggbb`；不合法返回 None。
+
+    接受 `#abc` / `abc` / `#AABBCC` 这些写法（与取色器一致），但**只存一种形状** ——
+    否则比较、去重、复制出去的字符串会各不相同。`#RRGGBBAA` 这类带 alpha 的
+    直接判不合法（长度 8 落不到这里）。
+    """
+    s = str(value or "").strip()
+    if s.startswith("#"):
+        s = s[1:]
+    s = s.lower()
+    if len(s) == 3 and all(c in "0123456789abcdef" for c in s):
+        s = "".join(c * 2 for c in s)
+    return f"#{s}" if COLOR_HEX_RE.match(s) else None
+
+
+def normalize_colors(raw) -> list[dict]:
+    """把文档里的 `colors` 收拾成 `[{id, name, value}]`。
+
+    手改过的 graph.json、以后换过格式的老文件都要经过这里，所以这里的规矩是
+    **读坏值不报错、丢掉那一条** —— 颜色库只是个便利贴，不该因为一条脏数据
+    让整个界面打不开。写入口（`/api/colors`）走的是另一套：那边**报错**，
+    因为那是用户当下输入的东西，得告诉他哪里不对。
+    """
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        value = normalize_color_value(item.get("value"))
+        name = normalize_color_name(item.get("name"))
+        if value is None or not name:
+            continue
+        cid = item.get("id")
+        if not isinstance(cid, str) or not cid.strip() or cid in seen:
+            cid = "color_" + uuid.uuid4().hex[:8]
+        seen.add(cid)
+        out.append({"id": cid, "name": name[:COLOR_NAME_MAX], "value": value})
+    return out
+
+
 class Workspace:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
@@ -147,9 +211,15 @@ class Workspace:
     def fresh_doc(self) -> dict:
         c = empty_canvas("画布 1")
         self.image_dir(c["id"], create=True)
-        # resourceDir：资源目录（工作目录之外的只读素材来源）。**跟随工作目录** ——
-        # 存在这份文档里，所以每个项目自带一个资源目录（见 DESIGN.md §2.4 / 资源目录一节）。
-        return {"version": DOC_VERSION, "current": c["id"], "resourceDir": "", "canvases": [c]}
+        # resourceDir / colors 都是**文档级**字段（跟随工作目录，不是每个画布一份）：
+        # 前者 = 资源目录（工作目录之外的素材来源），后者 = 颜色库（见 DESIGN.md §3.20）。
+        return {
+            "version": DOC_VERSION,
+            "current": c["id"],
+            "resourceDir": "",
+            "colors": [],
+            "canvases": [c],
+        }
 
     def migrate_v1(self, raw: dict | None) -> dict:
         """v1 → v2：老画布成为「画布 1」，顶层 images/ 整体挪进它的池子。"""
@@ -158,7 +228,13 @@ class Workspace:
             v = (raw or {}).get(k)
             c[k] = v if isinstance(v, list) else []
         self._move_legacy_images(self.image_dir(c["id"], create=True))
-        return {"version": DOC_VERSION, "current": c["id"], "resourceDir": "", "canvases": [c]}
+        return {
+            "version": DOC_VERSION,
+            "current": c["id"],
+            "resourceDir": "",
+            "colors": [],
+            "canvases": [c],
+        }
 
     def _move_legacy_images(self, dst: Path) -> int:
         """把 v1 的顶层 images/ 里的文件挪进画布池。
@@ -192,7 +268,7 @@ class Workspace:
         return moved
 
     def normalize_doc(self, doc: dict) -> dict:
-        """补字段：保证 current 指向存在的画布、每个画布有自己的图片目录。
+        """补字段：保证 current 指向存在的画布、每个画布有自己的图片目录、文档级字段齐全。
 
         老 v2 文件（少字段）和手改过的文件都会经过这里，所以读进来的一定是完整形状。
         """
@@ -201,6 +277,9 @@ class Workspace:
         # 所以和 current 一样是文档级字段，不是每个画布一份。
         if not isinstance(doc.get("resourceDir"), str):
             doc["resourceDir"] = ""
+        # 颜色库：同上，老文档没有这个字段。这一份是**过滤过的副本** ——
+        # 名字空着 / 值不合法 / id 重复的条目在这里就丢掉（`normalize_colors`）。
+        doc["colors"] = normalize_colors(doc.get("colors"))
         seen: set[str] = set()
         canvases: list[dict] = []
         for i, c in enumerate(doc.get("canvases") or []):

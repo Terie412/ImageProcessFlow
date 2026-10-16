@@ -14,7 +14,8 @@ import * as api from './api'
 import ResourceNode from './ResourceNode'
 import ProcessNode from './ProcessNode'
 import RegionEditor from './RegionEditor'
-import ResourcePanel, { RESOURCE_DRAG_MIME } from './ResourcePanel'
+import { RESOURCE_DRAG_MIME } from './ResourcePanel'
+import SidePanel from './SidePanel'
 import ImageViewer from './ImageViewer'
 
 const nodeTypes = { resource: ResourceNode, process: ProcessNode }
@@ -225,7 +226,9 @@ export default function App() {
   // 所以自己揣着 { url, title }，**关窗时负责把 blob 放掉**（谁建的谁释放）。
   const [iconShot, setIconShot] = useState(null)
   const [editing, setEditing] = useState(null) // 裁剪区域编辑器 { pid, image, regions }
-  // 左侧资源面板是否展开（纯界面偏好，记 localStorage，不进 graph.json）
+  // 左侧侧栏是否展开 —— 里面现在是「资源 / 颜色」两个页签（见 SidePanel.jsx）。
+  // 纯界面偏好，记 localStorage，不进 graph.json。键名保留 `resOpen`：
+  // 改键名等于让所有人的这个偏好重置回默认，不值当。
   const [resOpen, setResOpen] = useState(() => {
     try { return localStorage.getItem('ipf.resOpen') !== '0' } catch (e) { return true }
   })
@@ -1322,10 +1325,10 @@ export default function App() {
           <button
             className={`tb-ghost${resOpen ? ' on' : ''}`}
             aria-pressed={resOpen}
-            title={resOpen ? '收起资源面板' : '展开资源面板'}
+            title={resOpen ? '收起侧栏' : '展开侧栏（资源 / 颜色）'}
             onClick={toggleRes}
           >
-            资源
+            侧栏
           </button>
           <button className="tb-act" onClick={() => importRef.current?.click()} disabled={!state?.workspace}>
             ＋ 导入图片
@@ -1487,9 +1490,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* 左：资源面板（可收起）；右：画布。两者独立滚动/缩放 */}
+      {/* 左：侧栏（资源 / 颜色两个页签，可收起）；右：画布。两者独立滚动/缩放 */}
       <div className="app-body">
-        <ResourcePanel
+        <SidePanel
           state={state}
           applyState={applyState}
           flash={flash}

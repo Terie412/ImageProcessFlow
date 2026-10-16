@@ -10,11 +10,7 @@ import ImageViewer from './ImageViewer'
  * 值就是相对资源目录的路径 —— 落点时服务端据此直接复制，不经浏览器上传。 */
 export const RESOURCE_DRAG_MIME = 'application/x-ipf-resource'
 
-/* 面板宽度可以拖右边框改，纯界面偏好 —— 记 localStorage，不进 graph.json */
-const RES_W = { min: 180, max: 640, def: 262 }
-const clampW = (v) => Math.max(RES_W.min, Math.min(RES_W.max, Math.round(v)))
-
-/* 展开状态也记 localStorage（和宽度、开合同一类），但**按资源目录的路径分开记** ——
+/* 展开状态记 localStorage（和宽度、开合同一类），但**按资源目录的路径分开记** ——
    换到另一个资源目录时各记各的，切回来还是原来那样。值形如：
 
      { "E:\\glowup_project\\arts": ["主界面", "主界面/ui"] }
@@ -143,7 +139,7 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu, onPre
 }
 
 /*
- * 资源面板：显示「资源目录」的目录结构与文件。
+ * 资源面板：显示「资源目录」的目录结构与文件。**侧栏「资源」页签的内容**。
  *
  * - 读取是**懒加载**的：进入只读根目录一层，展开某个子目录时才请求它那一层。
  * - 图片可以**拖到画布**上自动建数据节点（拖 = 复制一份进当前画布的图片池）。
@@ -151,8 +147,11 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu, onPre
  *
  * 资源目录现在**可写**了（新建目录 / 改名 / 删除），但仍然只动它自己里面的东西，
  * 而且**不创建文件**、**删除走回收站**（见 DESIGN.md §3.15）。
+ *
+ * 这里**只管内容**：面板外壳（页签、宽度、收起、右边缘的拖宽手柄）在 SidePanel.jsx ——
+ * 颜色库是一个同级的页签，两边共用同一层壳，所以宽度和开合状态只有一份。
  */
-export default function ResourcePanel({ state, applyState, flash, open, onToggle }) {
+export default function ResourcePanel({ state, applyState, flash }) {
   const dir = state?.resourceDir || ''
   const hasWs = !!state?.workspace
 
@@ -170,57 +169,6 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
   // 双击图片文件打开的大图查看器（与数据节点共用 ImageViewer）。
   // info 是服务端读文件头得到的信息，拿不到也不影响看图 —— 尺寸交给图片自身兜底
   const [preview, setPreview] = useState(null) // { rel, name, mtime, info }
-
-  // 面板宽度（可拖右边框改，记 localStorage）
-  const [width, setWidth] = useState(() => {
-    try {
-      const v = Number(localStorage.getItem('ipf.resWidth'))
-      return Number.isFinite(v) && v > 0 ? clampW(v) : RES_W.def
-    } catch (e) {
-      return RES_W.def
-    }
-  })
-  const widthRef = useRef(width)
-  useEffect(() => {
-    widthRef.current = width
-  }, [width])
-
-  const saveWidth = (w) => {
-    try {
-      localStorage.setItem('ipf.resWidth', String(w))
-    } catch (e) {
-      /* 隐私模式下写不了，忽略 */
-    }
-  }
-
-  // 拖右边缘改宽度：mousemove 只改 state（不落盘），松手才写 localStorage
-  const startResize = (e) => {
-    if (e.button !== 0) return
-    e.preventDefault()
-    let latest = widthRef.current
-    let x0 = e.clientX
-    const w0 = latest
-    document.body.classList.add('col-resizing')
-    const move = (ev) => {
-      // 上限还要看窗口：别把画布挤得没地方
-      const max = Math.max(RES_W.min, Math.min(RES_W.max, window.innerWidth - 240))
-      latest = Math.max(RES_W.min, Math.min(max, Math.round(w0 + (ev.clientX - x0))))
-      setWidth(latest)
-    }
-    const up = () => {
-      document.body.classList.remove('col-resizing')
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-      saveWidth(latest)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
-
-  const resetWidth = () => {
-    setWidth(RES_W.def)
-    saveWidth(RES_W.def)
-  }
 
   const load = useCallback(async (rel) => {
     setTree((t) => ({ ...t, [rel]: { status: 'loading', entries: [], error: '' } }))
@@ -403,13 +351,13 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
     }
   }
 
-  if (!open) return null
-
   return (
-    <aside className="res-panel" style={{ width }}>
-      <div className="res-head">
-        <span className="res-title">资源</span>
-        {dir ? (
+    <div className="res-body">
+      {/* 头栏只在**有资源目录**时出现：里面的路径要可点、右边两个按钮都要有用。
+          还没指定时那行只会显示「未指定」，而标题的活已经被「资源」页签干掉了 —— 
+          空着那一行是纯噪音，下面的设置块把该说的话都说了。 */}
+      {dir ? (
+        <div className="res-head">
           <button
             className="res-path"
             title={`${dir}\n可在这里新建目录 / 改名 / 删除（删除进回收站）\n点击可手动输入路径`}
@@ -420,31 +368,20 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
           >
             {dir}
           </button>
-        ) : (
-          <span className="res-path empty">未指定</span>
-        )}
-        <span className="spacer" />
-        {dir ? (
-          <>
-            <button className="res-btn" title="刷新资源目录（保留展开状态）" aria-label="刷新资源目录" onClick={refresh}>
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                <path d="M13 8a5 5 0 1 1-1.5-3.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                <path d="M13 2.4V5h-2.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <button className="res-btn" title="更换资源目录" aria-label="更换资源目录" onClick={browse}>
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                <path d="M2 4.4h3.9l1.3 1.6H14v6H2z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </>
-        ) : null}
-        <button className="res-btn" title="收起资源面板" aria-label="收起资源面板" onClick={onToggle}>
-          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-            <path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
+          <span className="spacer" />
+          <button className="res-btn" title="刷新资源目录（保留展开状态）" aria-label="刷新资源目录" onClick={refresh}>
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path d="M13 8a5 5 0 1 1-1.5-3.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path d="M13 2.4V5h-2.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button className="res-btn" title="更换资源目录" aria-label="更换资源目录" onClick={browse}>
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path d="M2 4.4h3.9l1.3 1.6H14v6H2z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
 
       {!hasWs ? (
         <div className="res-hint">先选择一个工作目录 —— 资源目录跟随工作目录保存。</div>
@@ -626,14 +563,6 @@ export default function ResourcePanel({ state, applyState, flash, open, onToggle
             document.body,
           )
         : null}
-
-      {/* 右边缘：拖动改宽度（不可见，只靠光标提示），双击恢复默认 */}
-      <div
-        className="res-resizer"
-        title="拖动调整面板宽度（双击恢复默认）"
-        onMouseDown={startResize}
-        onDoubleClick={resetWidth}
-      />
-    </aside>
+    </div>
   )
 }

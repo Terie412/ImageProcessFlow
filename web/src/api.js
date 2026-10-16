@@ -117,6 +117,13 @@ export const resourceRawUrl = (path, mtime) =>
 export const resourceInfo = (path) =>
   fetch(`/api/resourcedir/info?path=${encodeURIComponent(path || '')}`).then(J)
 
+/* 颜色库（文档级字段，跟随工作目录存在 graph.json 里，见 DESIGN.md §3.20）。
+   一个颜色 = 名字 + 值（`#rrggbb`）。三个接口都回整包状态，调用方 applyState 即可。 */
+export const addColor = (name, value) => post('/api/colors', { name, value })
+export const updateColor = (id, payload) => patch(`/api/colors/${id}`, payload)
+export const deleteColor = (id) =>
+  fetch(`/api/colors/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(J)
+
 /* 图片池是按画布分的，所以取图**必须带画布 id** ——
    两个画布各有一个 A 是完全正常的，少了 id 会把别的画布的 A 拿过来 */
 export const imageUrl = (canvasId, name, mtime) =>

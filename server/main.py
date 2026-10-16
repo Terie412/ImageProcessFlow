@@ -30,7 +30,15 @@ import nodespec
 import polish as polish_mod
 import preview as preview_mod
 import registry as registry_mod
-from workspace import IMAGE_EXTS, CanvasView, Workspace, drop_tree
+from workspace import (
+    COLOR_NAME_MAX,
+    IMAGE_EXTS,
+    CanvasView,
+    Workspace,
+    drop_tree,
+    normalize_color_name,
+    normalize_color_value,
+)
 
 try:
     from PIL import Image as _PILImage
@@ -492,6 +500,9 @@ def state_payload() -> dict:
         # 资源目录（工作目录之外的只读素材来源，跟随工作目录存在 graph.json 里）。
         # 空串 = 还没指定，前端据此显示「选择资源目录」。
         "resourceDir": d.get("resourceDir") or "",
+        # 颜色库（同上是文档级字段，见 DESIGN.md §3.20）。顺序就是界面上的顺序 ——
+        # 新增的排最后，不做排序（用户自己记的顺序比字母序更有意义）。
+        "colors": [dict(c) for c in (d.get("colors") or [])],
         "canvasId": d["current"],
         "canvases": canvas_list(d),
         "graph": _decorate(graph(), d["current"]),
@@ -1409,6 +1420,88 @@ def api_resourcedir_info(path: str = ""):
             }
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"读不了这张图：{e}") from e
+
+
+# --------------------------------------------------------------------------
+# 颜色库：新增 / 修改 / 删除
+#
+# 一个颜色 = 名字 + 值（`#rrggbb`）。存在**文档级**字段 `colors` 里，跟随工作目录 ——
+# 和资源目录同一条理由（见 DESIGN.md §3.20）：一套配色是**这个项目**的资产。
+# 所有画布共用同一份（它是「参考」不是画布内容，切画布不该换一套颜色）。
+#
+# 与「读盘时的那套规范化」（`workspace.normalize_colors`）分工不同：那边**静默丢**
+# 坏数据，这边**报错** —— 用户当下输入的东西必须告诉他哪里不对，不能收了再悄悄改。
+# 三个接口一律回整包 `state_payload()`，前端就地把颜色库换掉（与画布接口同一套路）。
+# --------------------------------------------------------------------------
+def _color_input(payload: dict, *, partial: bool = False) -> dict:
+    """校验一次写请求，返回要落到条目上的字段。
+
+    `partial=True`（PATCH）时**没传的字段不动** —— 界面上的「编辑」是整条一起提交的，
+    但这个接口对得上 caller 的语义：只传 value 只改值。
+    """
+    out: dict = {}
+    if "name" in payload or not partial:
+        name = normalize_color_name(payload.get("name"))
+        if not name:
+            raise HTTPException(400, "颜色名不能是空的")
+        if len(name) > COLOR_NAME_MAX:
+            raise HTTPException(400, f"颜色名最长 {COLOR_NAME_MAX} 个字（收到 {len(name)} 个）")
+        out["name"] = name
+    if "value" in payload or not partial:
+        raw = payload.get("value")
+        value = normalize_color_value(raw)
+        if value is None:
+            raise HTTPException(
+                400,
+                f"颜色值要写成 #RRGGBB（3 位简写也认，不支持透明）：收到 {raw!r}",
+            )
+        out["value"] = value
+    return out
+
+
+def _find_color(cid: str) -> dict:
+    for c in doc().get("colors") or []:
+        if c.get("id") == cid:
+            return c
+    raise HTTPException(404, "颜色不存在（可能已经在别处删掉了）")
+
+
+@app.post("/api/colors")
+def api_color_add(payload: dict):
+    """新增一个颜色，排在最末尾。"""
+    fields = _color_input(payload or {})
+    with LOCK:
+        d = doc()
+        colors = d.setdefault("colors", [])
+        colors.append({"id": new_id("color"), **fields})
+        persist()
+    return state_payload()
+
+
+@app.patch("/api/colors/{cid}")
+def api_color_update(cid: str, payload: dict):
+    """改名字 / 改值（只带哪个字段就改哪个；两个都带就是整条覆盖）。"""
+    fields = _color_input(payload or {}, partial=True)
+    if not fields:
+        raise HTTPException(400, "没有要改的东西")
+    with LOCK:
+        _find_color(cid).update(fields)
+        persist()
+    return state_payload()
+
+
+@app.delete("/api/colors/{cid}")
+def api_color_delete(cid: str):
+    """删掉一个颜色。位置不保留 —— 后面那些直接前移。"""
+    with LOCK:
+        d = doc()
+        colors = d.get("colors") or []
+        left = [c for c in colors if c.get("id") != cid]
+        if len(left) == len(colors):
+            raise HTTPException(404, "颜色不存在（可能已经在别处删掉了）")
+        d["colors"] = left
+        persist()
+    return state_payload()
 
 
 @app.post("/api/resources/import-from-resource")
