@@ -1,7 +1,10 @@
-<!-- 标签页图标 = 顶栏那个品牌标记（styles.css 的 .toolbar .brand::before）：
-     135° 的 accent → #58d3b0 渐变圆角方块。两边用同一组颜色和圆角比例，
-     换个地方看还是同一个东西。16px 下只有 9px 见方，所以里面不放任何细节 ——
-     那些在这个尺寸下只会糊成一团。
+<!-- 标签页图标：IPF 字标 + 顶栏那套渐变（styles.css 的 .toolbar .brand::before：135° 的
+     accent → #58d3b0）。
+     字母是**描边路径**画的，不是 <text> —— SVG favicon 里的文字要系统字体，换台机器就可能
+     面目全非（字重、字面全变）。圆头圆角直接用 stroke-linecap/linejoin="round" 得到，
+     也不依赖任何字体。
+     几何（64 的格子里）：字高 28（y 18~46）、笔画 6.5（≈ 字高的 23%，够粗，缩到 16px 还有 1.6px），
+     P 的碗和 F 的中横都压在同一条 y=31 上，三个字母的视觉重心才齐。
      放在 web/public/ 而不是 server/static/：后者是构建产物，每次 build 都会清空。 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="ImageProcessFlow">
   <defs>
@@ -11,4 +14,13 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="20" fill="url(#ipf)" />
+  <g fill="none" stroke="#fff" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- I：一根竖条，圆头 -->
+    <path d="M11.5 18v28" />
+    <!-- P：竖干 + 半圆碗（半径 6.5，正好跨 y 18~31） -->
+    <path d="M23 46V18h5.5a6.5 6.5 0 0 1 0 13H23" />
+    <!-- F：竖干 + 上横 + 中横（中横与 P 的碗底同高） -->
+    <path d="M45 46V18h7.5" />
+    <path d="M45 31h5.5" />
+  </g>
 </svg>
