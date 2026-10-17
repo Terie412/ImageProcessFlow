@@ -188,10 +188,8 @@ export default function ColorPanel({ state, applyState, flash }) {
             <div className="modal-mask" onMouseDown={() => !busy && setEdit(null)}>
               <div className="modal cl-edit" onMouseDown={(e) => e.stopPropagation()}>
                 <h3>{edit.id ? '编辑颜色' : '新建颜色'}</h3>
-                <p>
-                  名字随便取（比如「主色 · 深」），值就是颜色本身 —— 不透明，只存{' '}
-                  <code>#RRGGBB</code>。
-                </p>
+                {/* 标题下面**不加说明文字**（2026-10-17 按用户要求去掉）：两个输入框自己
+                    说得很清楚，值不合法时取色器也会当场报原因。少两行字，窗更矮。 */}
                 <input
                   type="text"
                   autoFocus
