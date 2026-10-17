@@ -679,6 +679,33 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .color-pop input:focus { border-color: var(--accent); }
 
+/* 浮层底部的「颜色库」：已经记下来的颜色，点一下套用（见 ColorPicker.jsx）。
+   浮层内宽 208，所以一行一个、名字长了截断；最多露 5 行，再多在列表里滚 ——
+   浮层本身是**向上翻还是向下翻**看窗口高度，列表再高就更容易翻上去盖住节点。 */
+.color-lib {
+  display: flex; flex-direction: column; gap: 5px;
+  padding-top: 8px; border-top: 1px solid var(--line);
+}
+.color-lib-h { font-size: 10px; color: var(--muted); }
+.color-lib-list { max-height: 106px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+.color-lib-row {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; height: 21px; padding: 0 5px;
+  font-size: 11.5px; color: var(--text); text-align: left;
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+}
+.color-lib-row:hover:not(:disabled) { background: var(--panel); border-color: var(--line); }
+/* 当前值就是这一条 —— 用强调色框一下，免得对着两个一样的格子猜 */
+.color-lib-row.on { background: rgba(79, 156, 249, .12); border-color: var(--accent); }
+/* 色块：深色靠白圈、浅色靠黑边，压在任何底色上都看得见边界（同 .cfg-color 的做法） */
+.color-lib-sw {
+  flex: 0 0 auto; width: 12px; height: 12px; border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, .45);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .10);
+}
+.color-lib-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------------- 裁剪区域（处理节点的 regions 主体） ---------------- */
 .regions {
   flex: 1 1 auto; min-height: 0;

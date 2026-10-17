@@ -209,6 +209,8 @@ export default function ColorPanel({ state, applyState, flash }) {
                     <ColorField
                       value={edit.value}
                       label="颜色"
+                      /* 取色器浮层底部也列出颜色库 —— 编辑现有颜色时可以一键换成别的 */
+                      colors={colors}
                       onCommit={(hex) => setEdit((m) => (m ? { ...m, value: hex } : m))}
                       onTip={setErr}
                     />

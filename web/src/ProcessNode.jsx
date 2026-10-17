@@ -75,6 +75,8 @@ export default function ProcessNode({ id, data, selected }) {
     error,
     inputs = {},
     canvasId,
+    // 颜色库（App.buildNodes 灌进 data）：取色器浮层底部列出「记下来的颜色」供快速选择
+    colors = [],
     lastDuration,
     // 「尺寸 = 自动」会落到哪个预设 —— 服务端按最后一张参考图算好下发
     // （server/autosize.py）。必须在**生成之前**就能看到，否则要等生成完
@@ -607,6 +609,7 @@ export default function ProcessNode({ id, data, selected }) {
                   <ColorField
                     value={params[s.key]}
                     label={s.label || s.key}
+                    colors={colors}
                     onCommit={(hex) => onParam(id, s.key, hex)}
                     onTip={onToast}
                   />

@@ -111,6 +111,9 @@ function firstLinkedRes(st, pid) {
 /* ------------------------------------------------------------------ */
 /* 由服务端 graph 构造 React Flow 的 nodes / edges                      */
 /* ------------------------------------------------------------------ */
+// 常量空数组：没有颜色库时别每次构造节点都造一个新数组
+const EMPTY_COLORS = []
+
 function buildNodes(state, cbs) {
   if (!state?.graph) return []
   const resById = {}
@@ -159,6 +162,10 @@ function buildNodes(state, cbs) {
           canvasId: state.canvasId,
           manifest: state.manifests?.[p.defId],
           inputs: portMap[p.id] || {},
+          // 颜色库：进程节点的 `color` 参数要把取色器浮层里那一列「记下来的颜色」画出来
+          // （见 ColorPicker.jsx）。放在 data 里而不是走 context —— 节点本来就从 state
+          // 构造，多带一份引用比绕一层 provider 直白。
+          colors: state.colors || EMPTY_COLORS,
           minW: spec?.minW ?? p.w,
           minH: spec?.minH ?? p.h,
           ...cbs,

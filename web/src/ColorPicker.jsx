@@ -1,4 +1,5 @@
-/* 自研取色器：点节点上的色块弹出，色域 + 色相条 + **两个纯文本输入框**（十六进制 / RGB）。
+/* 自研取色器：点节点上的色块弹出，色域 + 色相条 + **两个纯文本输入框**（十六进制 / RGB），
+ * 最下面还有一列**颜色库**（调用方传进来的 `colors`，见文件末尾的 `.color-lib`）。
  *
  * 为什么要自研：原先用的是 `<input type="color">`，弹出来的是**浏览器原生取色器** ——
  * 它的 DOM 我们碰不到，往里加输入框是不可能的（能看到、能点，但不受我们控制）。
@@ -29,8 +30,8 @@ const POP_W = SV_W + 20 // 左右各 10px 内边距
 const clamp01 = (v) => Math.max(0, Math.min(1, v))
 const HEX_OK = /^#[0-9a-fA-F]{6}$/
 
-/** 节点上的那个色块 + 它自己的浮层。`onCommit(hex)` / `onTip(msg, kind)` */
-export default function ColorField({ value, label, onCommit, onTip }) {
+/** 节点上的那个色块 + 它自己的浮层。`onCommit(hex)` / `onTip(msg)` */
+export default function ColorField({ value, label, onCommit, onTip, colors }) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef(null)
   // 历史值不合法（手改过 graph.json）时兜成黑色，别让 React 收到非法样式
@@ -50,6 +51,7 @@ export default function ColorField({ value, label, onCommit, onTip }) {
         <Popover
           anchor={btnRef}
           value={v}
+          colors={colors}
           onCommit={onCommit}
           onTip={onTip}
           onClose={() => setOpen(false)}
@@ -59,7 +61,7 @@ export default function ColorField({ value, label, onCommit, onTip }) {
   )
 }
 
-function Popover({ anchor, value, onCommit, onTip, onClose }) {
+function Popover({ anchor, value, colors, onCommit, onTip, onClose }) {
   const vp = useViewport() // 画布平移 / 缩放时要重新量锚点，靠它触发重渲染
   const popRef = useRef(null)
   const svRef = useRef(null)
@@ -209,6 +211,7 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
   }
 
   const hue = hsv.h
+  const lib = colors || [] // 颜色库（调用方没给就是空 —— 这一块干脆不画）
   const svBg =
     `linear-gradient(to top, #000, rgba(0,0,0,0)),` +
     `linear-gradient(to right, #fff, hsl(${hue}, 100%, 50%))`
@@ -278,6 +281,39 @@ function Popover({ anchor, value, onCommit, onTip, onClose }) {
           />
         </label>
       </div>
+
+      {/* 颜色库：把侧栏「颜色」页签里记下来的颜色列在这儿，点一下就用它。
+          选完**立刻收起浮层** —— 这是「快速选择」，不是让人在这儿挑色阶。
+          数据由调用方给（节点走 data.colors、颜色库的编辑窗走 state.colors），
+          没有就不画这一块，取色器其余功能一点不受影响。 */}
+      {lib.length ? (
+        <div className="color-lib">
+          <div className="color-lib-h">颜色库</div>
+          <div className="color-lib-list">
+            {lib.map((c) => {
+              // 存下来的值理论上都是 #rrggbb（服务端归一过），坏值只当没有色块画
+              const ok = HEX_OK.test(c.value || '')
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`color-lib-row${ok && c.value === value ? ' on' : ''}`}
+                  title={`${c.name} · ${c.value}`}
+                  onClick={() => {
+                    const rgb = ok ? hexToRgb(c.value) : null
+                    if (!rgb) return
+                    applyRgb(rgb)
+                    closeRef.current?.()
+                  }}
+                >
+                  <span className="color-lib-sw" style={{ background: ok ? c.value : 'transparent' }} />
+                  <span className="color-lib-name">{c.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>,
     document.body,
   )
