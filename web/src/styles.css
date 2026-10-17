@@ -679,15 +679,35 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .color-pop input:focus { border-color: var(--accent); }
 
-/* 浮层底部的「颜色库」：已经记下来的颜色，点一下套用（见 ColorPicker.jsx）。
-   浮层内宽 208，所以一行一个、名字长了截断；最多露 5 行，再多在列表里滚 ——
-   浮层本身是**向上翻还是向下翻**看窗口高度，列表再高就更容易翻上去盖住节点。 */
+/* 浮层底部的「颜色库」：**默认收起成一行**，点开才列出已经记下来的颜色
+   （颜色会越积越多，一上来全摊开会把浮层撑得很高）。
+   收起时：左边「颜色库」+ 条数，右边一个箭头；展开后箭头翻过来。 */
 .color-lib {
-  display: flex; flex-direction: column; gap: 5px;
+  display: flex; flex-direction: column; gap: 4px;
   padding-top: 8px; border-top: 1px solid var(--line);
 }
-.color-lib-h { font-size: 10px; color: var(--muted); }
-.color-lib-list { max-height: 106px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+.color-lib-toggle {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; height: 22px; padding: 0 5px;
+  font-size: 11px; color: var(--muted); text-align: left;
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+}
+.color-lib-toggle:hover:not(:disabled) { color: var(--text); background: var(--panel); border-color: var(--line); }
+.color-lib-h { flex: 0 0 auto; }
+/* 条数：一个小药丸，让人知道「里面还有东西、有多少」 */
+.color-lib-n {
+  flex: 0 0 auto; padding: 0 5px; border-radius: 8px;
+  font-size: 9.5px; line-height: 14px; font-variant-numeric: tabular-nums;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.color-lib-caret {
+  flex: 0 0 auto; margin-left: auto; font-size: 9px;
+  transition: transform .12s;
+}
+.color-lib-toggle.open { color: var(--text); }
+.color-lib-toggle.open .color-lib-caret { transform: rotate(180deg); }
+/* 展开后的列表：最多露 7 行，再多在里面滚（浮层因此变高，定位那边会重新夹一次） */
+.color-lib-list { max-height: 150px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
 .color-lib-row {
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 7px;

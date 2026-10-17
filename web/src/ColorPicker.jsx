@@ -73,7 +73,15 @@ function Popover({ anchor, value, colors, onCommit, onTip, onClose }) {
   const [hsv, setHsv] = useState(() => rgbToHsv(hexToRgb(value) || [0, 0, 0]))
   const [hexText, setHexText] = useState(value)
   const [rgbText, setRgbText] = useState(toRgbText(value))
+  // 颜色库默认**收起**：颜色会越积越多，一上来摊开整张列表会把浮层撑得很高
+  // （而且下面还要放输入框）。收起时只占一行，点开才列。
+  const [libOpen, setLibOpen] = useState(false)
   hsvRef.current = hsv
+
+  // 调用方没给颜色库就是空 —— 那一块干脆不画。定义在定位那个 effect 之前：
+  // 它的依赖数组要在渲染期就拿到值（写在后面会撞上 TDZ）
+  const lib = colors || []
+  const libCount = lib.length
 
   /* onClose 每次渲染都是新的函数，用 ref 兜住，两个监听都只挂**一次**。
      这是 ImageViewer 里踩过的同一个坑：把 onClose 直接放进依赖数组，监听就会被
@@ -100,7 +108,10 @@ function Popover({ anchor, value, colors, onCommit, onTip, onClose }) {
   }, [value])
 
   /* 位置：先量锚点、再按浮层实际尺寸夹进窗口（右下角就往上翻）。
-     画布平移 / 缩放会走到这里（vp 变了 → 重渲染 → 重新量）。 */
+     画布平移 / 缩放会走到这里（vp 变了 → 重渲染 → 重新量）。
+     **展开颜色库也要重算**（`libOpen` 在依赖里）：浮层会一下子变高，不重算的话
+     底下那几行就掉到窗口外去了；最后那一行是兜底 —— 翻上去仍然放不下时，宁可
+     整块往上挪，也不能让列表的下半截点不到。 */
   useLayoutEffect(() => {
     const a = anchor.current?.getBoundingClientRect()
     const el = popRef.current
@@ -111,8 +122,9 @@ function Popover({ anchor, value, colors, onCommit, onTip, onClose }) {
     let top = a.bottom + 6
     if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8)
     if (top + h > window.innerHeight - 8) top = Math.max(8, a.top - h - 6)
+    if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8)
     setPos({ left, top })
-  }, [anchor, vp.x, vp.y, vp.zoom])
+  }, [anchor, vp.x, vp.y, vp.zoom, libOpen, libCount])
 
   // 点到浮层外面收起（点自己那个色块不算 —— 交给它的 onClick 去开关，否则会「关了又开」）
   useEffect(() => {
@@ -211,7 +223,6 @@ function Popover({ anchor, value, colors, onCommit, onTip, onClose }) {
   }
 
   const hue = hsv.h
-  const lib = colors || [] // 颜色库（调用方没给就是空 —— 这一块干脆不画）
   const svBg =
     `linear-gradient(to top, #000, rgba(0,0,0,0)),` +
     `linear-gradient(to right, #fff, hsl(${hue}, 100%, 50%))`
@@ -282,36 +293,50 @@ function Popover({ anchor, value, colors, onCommit, onTip, onClose }) {
         </label>
       </div>
 
-      {/* 颜色库：把侧栏「颜色」页签里记下来的颜色列在这儿，点一下就用它。
-          选完**立刻收起浮层** —— 这是「快速选择」，不是让人在这儿挑色阶。
+      {/* 颜色库：**默认收起的一行**，点开才列 —— 颜色会越积越多，一上来摊开整张列表
+          会把浮层撑得老高（下面还得放输入框）。
+          选完**立刻收起浮层**：这是「快速选择」，不是让人在这儿挑色阶。
           数据由调用方给（节点走 data.colors、颜色库的编辑窗走 state.colors），
           没有就不画这一块，取色器其余功能一点不受影响。 */}
-      {lib.length ? (
+      {libCount ? (
         <div className="color-lib">
-          <div className="color-lib-h">颜色库</div>
-          <div className="color-lib-list">
-            {lib.map((c) => {
-              // 存下来的值理论上都是 #rrggbb（服务端归一过），坏值只当没有色块画
-              const ok = HEX_OK.test(c.value || '')
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`color-lib-row${ok && c.value === value ? ' on' : ''}`}
-                  title={`${c.name} · ${c.value}`}
-                  onClick={() => {
-                    const rgb = ok ? hexToRgb(c.value) : null
-                    if (!rgb) return
-                    applyRgb(rgb)
-                    closeRef.current?.()
-                  }}
-                >
-                  <span className="color-lib-sw" style={{ background: ok ? c.value : 'transparent' }} />
-                  <span className="color-lib-name">{c.name}</span>
-                </button>
-              )
-            })}
-          </div>
+          <button
+            type="button"
+            className={`color-lib-toggle${libOpen ? ' open' : ''}`}
+            aria-expanded={libOpen}
+            title={libOpen ? '收起颜色库' : '展开颜色库'}
+            onClick={() => setLibOpen((o) => !o)}
+          >
+            <span className="color-lib-h">颜色库</span>
+            <span className="color-lib-n">{libCount}</span>
+            <span className="color-lib-caret">▾</span>
+          </button>
+
+          {libOpen ? (
+            <div className="color-lib-list">
+              {lib.map((c) => {
+                // 存下来的值理论上都是 #rrggbb（服务端归一过），坏值只当没有色块画
+                const ok = HEX_OK.test(c.value || '')
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`color-lib-row${ok && c.value === value ? ' on' : ''}`}
+                    title={`${c.name} · ${c.value}`}
+                    onClick={() => {
+                      const rgb = ok ? hexToRgb(c.value) : null
+                      if (!rgb) return
+                      applyRgb(rgb)
+                      closeRef.current?.()
+                    }}
+                  >
+                    <span className="color-lib-sw" style={{ background: ok ? c.value : 'transparent' }} />
+                    <span className="color-lib-name">{c.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>,
