@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 标签页图标（源文件在 web/public/favicon.svg —— 不是 server/static，
+         那是构建产物，每次 build 都会清空）。浏览器认 SVG 就不用再要 favicon.ico。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- 移动端地址栏 / 状态栏的配色，跟面板同色 -->
+    <meta name="theme-color" content="#1e2127" />
     <title>ImageProcessFlow</title>
   </head>
   <body>

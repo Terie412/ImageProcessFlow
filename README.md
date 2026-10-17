@@ -224,6 +224,8 @@ cd web && npm run build                                        :: 构建到 serv
 runtime\venv\Scripts\python.exe server\main.py -w <工作目录>   :: 直接跑后端
 ```
 
+> `server/static` 是**构建产物** —— 每次 `npm run build` 都会先把它清空。要往站点里带静态文件（现在只有 `favicon.svg`）就放进 `web/public/`，Vite 会原样拷到根；直接扔进 `server/static` 的话下次构建就没了。
+
 > 重装前端依赖后若 `vite build` 报 `Cannot find module @rollup/...`（沙箱注入的 `NODE_OPTIONS` 垫片会让 npm 漏装 optional 依赖）：
 > `cd web && npm install @esbuild/win32-x64@0.21.5 --save-exact && npm install @rollup/rollup-win32-x64-msvc@4.64.5 --save-exact`
 
