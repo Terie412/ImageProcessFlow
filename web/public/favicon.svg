@@ -5,6 +5,9 @@
      也不依赖任何字体。
      几何（64 的格子里）：字高 28（y 18~46）、笔画 6.5（≈ 字高的 23%，够粗，缩到 16px 还有 1.6px），
      P 的碗和 F 的中横都压在同一条 y=31 上，三个字母的视觉重心才齐。
+     **字母用深墨色 #101b26，不用白**：渐变是从亮蓝到亮薄荷的**明底**，白字压在薄荷端只有
+     1.85:1 的对比（WCAG 要 4.5:1），小尺寸下几乎糊成一片。换成墨色后薄荷端 9.3:1、蓝端 6.1:1，
+     两头都立得住，而且深色字跟这个暗色界面是一个家族。
      放在 web/public/ 而不是 server/static/：后者是构建产物，每次 build 都会清空。 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="ImageProcessFlow">
   <defs>
@@ -14,7 +17,7 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="20" fill="url(#ipf)" />
-  <g fill="none" stroke="#fff" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+  <g fill="none" stroke="#101b26" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
     <!-- I：一根竖条，圆头 -->
     <path d="M11.5 18v28" />
     <!-- P：竖干 + 半圆碗（半径 6.5，正好跨 y 18~31） -->
