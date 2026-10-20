@@ -1,0 +1,94 @@
+{
+  "id": "mask",
+  "name": "蒙版制作",
+  "entry": "mask.py",
+  "inputs": [],
+  "params": [
+    {
+      "key": "width",
+      "type": "number",
+      "default": 512,
+      "min": 16,
+      "max": 2048,
+      "step": 1,
+      "label": "宽"
+    },
+    {
+      "key": "height",
+      "type": "number",
+      "default": 512,
+      "min": 16,
+      "max": 2048,
+      "step": 1,
+      "label": "高"
+    },
+    {
+      "key": "shape",
+      "type": "enum",
+      "default": "rect",
+      "label": "形状",
+      "newRow": true,
+      "options": [
+        {
+          "value": "rect",
+          "label": "矩形"
+        },
+        {
+          "value": "ellipse",
+          "label": "椭圆形"
+        }
+      ]
+    },
+    {
+      "key": "rectRX",
+      "type": "number",
+      "default": 192,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "label": "矩形横轴半径"
+    },
+    {
+      "key": "rectRY",
+      "type": "number",
+      "default": 192,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "label": "矩形竖轴半径"
+    },
+    {
+      "key": "ellipseRX",
+      "type": "number",
+      "default": 192,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "label": "椭圆横轴半径"
+    },
+    {
+      "key": "ellipseRY",
+      "type": "number",
+      "default": 192,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "label": "椭圆竖轴半径"
+    }
+  ],
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": false
+    }
+  ],
+  "preview": {
+    "func": "render"
+  },
+  "_note": "按参数画一张蒙版：形状内不透明纯白、外面完全透明（RGBA PNG），可以直接当 alpha 用。**没有输入口** —— 它不是处理图，是凭空造图。画布 = 「宽 × 高」，形状永远**画布居中**：矩形的总宽高 = 2×横轴半径 / 2×竖轴半径，椭圆以这两个数为半轴；两组半径各存各的，切形状不丢。半径超出画布就被裁（矩形铺满、椭圆只剩中间那条带）。",
+  "size": {
+    "defaultWidth": 340,
+    "defaultHeight": 460
+  }
+}
