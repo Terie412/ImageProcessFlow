@@ -46,7 +46,13 @@
       "min": 0,
       "max": 4096,
       "step": 1,
-      "label": "矩形横轴半径"
+      "label": "矩形横轴半径",
+      "showIf": {
+        "key": "shape",
+        "in": [
+          "rect"
+        ]
+      }
     },
     {
       "key": "rectRY",
@@ -55,7 +61,13 @@
       "min": 0,
       "max": 4096,
       "step": 1,
-      "label": "矩形竖轴半径"
+      "label": "矩形竖轴半径",
+      "showIf": {
+        "key": "shape",
+        "in": [
+          "rect"
+        ]
+      }
     },
     {
       "key": "ellipseRX",
@@ -64,7 +76,13 @@
       "min": 0,
       "max": 4096,
       "step": 1,
-      "label": "椭圆横轴半径"
+      "label": "椭圆横轴半径",
+      "showIf": {
+        "key": "shape",
+        "in": [
+          "ellipse"
+        ]
+      }
     },
     {
       "key": "ellipseRY",
@@ -73,7 +91,13 @@
       "min": 0,
       "max": 4096,
       "step": 1,
-      "label": "椭圆竖轴半径"
+      "label": "椭圆竖轴半径",
+      "showIf": {
+        "key": "shape",
+        "in": [
+          "ellipse"
+        ]
+      }
     }
   ],
   "outputs": [
@@ -89,6 +113,6 @@
   "_note": "按参数画一张蒙版：形状内不透明纯白、外面完全透明（RGBA PNG），可以直接当 alpha 用。**没有输入口** —— 它不是处理图，是凭空造图。画布 = 「宽 × 高」，形状永远**画布居中**：矩形的总宽高 = 2×横轴半径 / 2×竖轴半径，椭圆以这两个数为半轴；两组半径各存各的，切形状不丢。半径超出画布就被裁（矩形铺满、椭圆只剩中间那条带）。",
   "size": {
     "defaultWidth": 340,
-    "defaultHeight": 460
+    "defaultHeight": 420
   }
 }

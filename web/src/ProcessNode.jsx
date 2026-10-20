@@ -110,7 +110,24 @@ export default function ProcessNode({ id, data, selected }) {
   const curBackend = (allSpecs.find((s) => s.key === 'model')?.options || [])
     .map((o) => (typeof o === 'string' ? { value: o } : o))
     .find((o) => o.value === params.model)?.backend
-  const specs = allSpecs.filter((s) => !s.backend || s.backend === curBackend)
+
+  /* 另一条更通用的条件显示：`"showIf": { "key": "shape", "in": ["rect"] }` ——
+     由**另一个参数的当前值**决定这一项出不出现（蒙版制作把矩形 / 椭圆两套半径
+     分别绑在形状上，选中哪个只显示哪一套）。
+     - 读的是**本地** params（不是服务端回灌的那份）：切下拉当场就换，不用等防抖 PATCH；
+     - 只支持一层（被依赖的那个参数自己不能又是条件显示的）—— 够用，多一层只是徒增
+       看不懂的界面，真要嵌套再改；
+     - 和上面 backend 那条一样：**只是不显示**，值一直躺在 params 里，切回来还在。 */
+  const shownByValue = (s) => {
+    const cond = s.showIf
+    if (!cond || !cond.key) return true
+    const allow = Array.isArray(cond.in) ? cond.in : [cond.in]
+    return allow.some((v) => String(v) === String(params[cond.key] ?? ''))
+  }
+
+  const specs = allSpecs.filter(
+    (s) => (!s.backend || s.backend === curBackend) && shownByValue(s),
+  )
   const primary = specs.find((s) => s.primary) || specs.find((s) => s.type === 'text')
   const others = specs.filter((s) => s !== primary)
   const primaryText = primary && primary.type === 'text' ? params[primary.key] ?? '' : ''

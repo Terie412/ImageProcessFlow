@@ -1,0 +1,40 @@
+{
+  "id": "blur",
+  "name": "高斯模糊",
+  "entry": "blur.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "输入图",
+      "count": 1,
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "strength",
+      "type": "number",
+      "default": 8,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "label": "强度"
+    }
+  ],
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
+  "_note": "整张图做高斯模糊，「强度」就是模糊半径（像素，0 = 原样不模糊）。多输入逐张独立处理，几张进几张出。**带 Alpha 的图 alpha 也一起被模糊**（边缘会变软）—— 这是刻意的：模糊一张带透明边的图标时，你多半也想要软边；只想糊内容、保住硬边的话，先垫个底色再糊。输出格式：有 Alpha 一律 PNG（别的格式存不住透明），没有就跟随原图（JPEG / WEBP / BMP / PNG），不认识的退化成 PNG。",
+  "size": {
+    "defaultWidth": 220,
+    "defaultHeight": 200
+  }
+}
