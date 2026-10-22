@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -507,12 +508,69 @@ def restore_positions(graph: dict, snapshot: list[dict]) -> int:
 
 
 # --------------------------------------------------------------------------
+# 并行判据：两个节点能不能同时动
+# --------------------------------------------------------------------------
+def dep_maps(graph: dict) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """整张图的 前驱 / 后继，**含隐式边**（处理节点 → 它产出的数据节点）。
+
+    ⚠️ 画布上的 `graph["edges"]` 只有「数据节点 → 处理节点」一种。光看它，
+    任意两个**处理节点**之间都不存在路径 —— 拿来做可达性判断会把所有节点都
+    当成互不相关（包括直接上下游）。所以必须把 producer 那条边补上。
+    排版用的 `_fmt_links()` 是同一份口径，两处要一起改。
+    """
+    succ: dict[str, list[str]] = {}
+    pred: dict[str, list[str]] = {}
+    for n in (*graph.get("resources", []), *graph.get("processes", [])):
+        succ.setdefault(n["id"], [])
+        pred.setdefault(n["id"], [])
+    for e in graph.get("edges", []):
+        a, b = e.get("from"), e.get("to")
+        if a in succ and b in succ:
+            succ[a].append(b)
+            pred[b].append(a)
+    for r in graph.get("resources", []):
+        pid = r.get("producer")
+        if pid in succ and r["id"] in succ:
+            succ[pid].append(r["id"])
+            pred[r["id"]].append(pid)
+    return succ, pred
+
+
+def closure(graph: dict, ids) -> set[str]:
+    """`ids` 自己 + 它们的**全部上游** + **全部下游**（DESIGN.md §2.2.5）。
+
+    这就是「`ids` 正在执行时，哪一堆节点不许动」。两个节点能同时动，当且仅当
+    **谁都不在对方的闭包里** —— 也就是互不为上下游。
+
+    ⚠️ 这不等于「闭包不相交」：兄弟节点共用同一个输入图，闭包在**那个输入**上
+    必然相交，但兄弟本来就是能并行的（都只读那张图）。相交只说明「那张输入图
+    不许动」，不说明兄弟不能同时跑。
+
+    注意**包含自己**：上游/下游是严格关系，判不出「自己」。而自己正在跑的时候
+    尤其不能重入（会抢同一批输出名、互相覆盖文件）。
+    """
+    succ, pred = dep_maps(graph)
+    seeds = {i for i in ids if i in succ}
+    out = set(seeds)
+    for nb in (succ, pred):          # 分别往上、往下，不能交叉走（斜角不算相关）
+        stack = list(seeds)
+        while stack:
+            cur = stack.pop()
+            for nxt in nb.get(cur, ()):
+                if nxt not in out:
+                    out.add(nxt)
+                    stack.append(nxt)
+    return out
+
+
+# --------------------------------------------------------------------------
 # 运行状态（供 SSE 使用）
 # --------------------------------------------------------------------------
 class RunState:
-    def __init__(self, run_id: str, process_id: str):
+    def __init__(self, run_id: str, process_id: str, canvas_id: str = ""):
         self.id = run_id
         self.process_id = process_id
+        self.canvas_id = canvas_id
         self.lines: list[str] = []
         self.status = "running"          # running | done | error
         self.error: str | None = None
@@ -529,13 +587,26 @@ class RunState:
 
 
 class RunManager:
+    """所有正在跑 / 刚跑完的执行。
+
+    并行度只有一处依据，就是这里：`active()` 里还在跑的节点，它们的上下游闭包
+    才是「不许动」的范围（见 `closure`）。判据一律走**内存**，不看画布上那个
+    持久化的 `status` —— 服务崩一次，磁盘上的 status 会永远停在 running。
+    """
+
+    KEEP_FINISHED = 64        # 跑完的留着供日志用，超过这个数就丢掉最老的
+
     def __init__(self):
         self.runs: dict[str, RunState] = {}
 
-    def create(self, process_id: str) -> RunState:
+    def create(self, canvas_id: str, process_id: str) -> RunState:
         rid = uuid.uuid4().hex[:12]
-        st = RunState(rid, process_id)
+        st = RunState(rid, process_id, canvas_id)
         self.runs[rid] = st
+        done = [r for r in self.runs.values() if r.finished]
+        if len(done) > self.KEEP_FINISHED:
+            for r in done[: len(done) - self.KEEP_FINISHED]:
+                self.runs.pop(r.id, None)
         return st
 
     def get(self, rid: str) -> RunState | None:
@@ -543,6 +614,29 @@ class RunManager:
 
     def drop(self, rid: str) -> None:
         self.runs.pop(rid, None)
+
+    # ---------------- 并行判定 ----------------
+    def active(self) -> list[RunState]:
+        return [r for r in self.runs.values() if not r.finished]
+
+    def count(self) -> int:
+        return len(self.active())
+
+    def active_pids(self, canvas_id: str) -> set[str]:
+        """这个画布上正在跑的节点 id。"""
+        return {r.process_id for r in self.active() if r.canvas_id == canvas_id}
+
+    def is_active(self, canvas_id: str, process_id: str) -> bool:
+        """这个节点自己正在跑（重入判定 —— 上下游判据判不出自己）。"""
+        return any(
+            not r.finished and r.canvas_id == canvas_id and r.process_id == process_id
+            for r in self.runs.values()
+        )
+
+    def active_in(self, canvas_id: str) -> bool:
+        """这个画布上有没有任何执行中的动作（画布改名/删除的判据）。"""
+        return any(r.canvas_id == canvas_id for r in self.active())
+
 
 
 # --------------------------------------------------------------------------
@@ -601,6 +695,27 @@ def remove_resource_node(graph: dict, rid: str, ws: CanvasView) -> None:
 # --------------------------------------------------------------------------
 # 主流程
 # --------------------------------------------------------------------------
+class _Prepared:
+    """准备阶段备好的东西。
+
+    跑脚本只要 `run_dir` / `script` / `payload`；收尾还要 `proc` / `manifest`。
+    中间那段（子进程全程）**不碰 graph**，所以才能不持锁。
+    """
+
+    __slots__ = ("proc", "manifest", "specs", "params", "inputs", "run_dir", "payload", "script", "t0")
+
+    def __init__(self, proc, manifest, specs, params, inputs, run_dir, payload, script):
+        self.proc = proc
+        self.manifest = manifest
+        self.specs = specs
+        self.params = params
+        self.inputs = inputs
+        self.run_dir = run_dir
+        self.payload = payload
+        self.script = script
+        self.t0 = 0.0
+
+
 def execute(
     ws: CanvasView,
     graph: dict,
@@ -608,15 +723,51 @@ def execute(
     pid: str,
     st: RunState,
     settings: dict | None = None,
+    lock=None,
+    alive=None,
 ) -> tuple[bool, str | None]:
+    """跑一个处理节点。**锁只包住前后两段，不包住子进程。**
+
+    这是并行度的全部关键（DESIGN.md §2.2.5）：准备阶段要读图（校验输入、算参数、
+    挑尺寸），收尾阶段要写图（重绑槽位、搬文件、标脏），两段都必须持锁 ——
+    但都是毫秒级的；中间等子进程的 10~60 秒**一点锁都不拿**，互不相关的节点
+    才可能同时跑。
+
+    `lock` 由主程序传进来（可重入的全局锁），不传就是不加锁（纯单测用）。
+    `alive()` 在收尾前确认这个节点所在的画布还在 —— 画布被删了就别往里面写。
+    """
+    gate = lock if lock is not None else contextlib.nullcontext()
+
+    with gate:
+        prep, err = _prepare(ws, graph, registry, pid, st, settings)
+    if prep is None:
+        return False, err
+
+    produced, err = _run(prep, st)          # ← 这一段不持锁
+    if produced is None:
+        return False, err
+
+    with gate:
+        return _commit(ws, graph, prep, produced, st, settings, alive)
+
+
+def _prepare(
+    ws: CanvasView,
+    graph: dict,
+    registry: dict[str, dict],
+    pid: str,
+    st: RunState,
+    settings: dict | None = None,
+) -> tuple[_Prepared | None, str | None]:
+    """持锁阶段一：读图 + 校验 + 算参数 + 开临时目录。只读，不外写。"""
     emit = st.emit
 
     proc = _process(graph, pid)
     if proc is None:
-        return False, "处理节点不存在"
+        return None, "处理节点不存在"
     manifest = registry.get(proc.get("defId", ""))
     if manifest is None:
-        return False, f"未注册的脚本: {proc.get('defId')}"
+        return None, f"未注册的脚本: {proc.get('defId')}"
 
     ws.ensure()
     specs = registry_mod.port_specs(manifest, proc)
@@ -635,7 +786,7 @@ def execute(
         if res is None or ws.image_path(res["name"]) is None:
             missing.append(label)
     if missing:
-        return False, "输入缺失: " + "、".join(missing)
+        return None, "输入缺失: " + "、".join(missing)
 
     # ---- 组装参数 ----
     # 提示词原样传给脚本，不做任何隐式改写：用户在提示词里直接写「参考图1」
@@ -693,7 +844,7 @@ def execute(
     script = Path(manifest["_dir"]) / manifest.get("entry", "")
     if not script.is_file():
         drop_tree(run_dir)
-        return False, f"脚本文件不存在: {script}"
+        return None, f"脚本文件不存在: {script}"
 
     emit(f"[engine] 执行「{manifest.get('name', proc['defId'])}」")
     # 列出每个输入口挂的是哪张图，方便对照提示词里写的「参考图N」
@@ -708,8 +859,24 @@ def execute(
     emit(f"[engine] 参数: {json.dumps(params, ensure_ascii=False)}")
     emit("")
 
+    return (
+        _Prepared(proc, manifest, specs, params, inputs, run_dir, payload, script),
+        None,
+    )
+
+
+def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
+    """**不持锁**阶段：起子进程、收日志、等它退出、收集产出。
+
+    这一段只碰自己那次执行的临时目录，所以可以放心地跑几十秒。
+    """
+    emit = st.emit
+    script = prep.script
+    run_dir = prep.run_dir
+    payload = prep.payload
+
     # 从这里开始计时，覆盖子进程全程（含模型调用与图片下载）
-    t0 = time.perf_counter()
+    prep.t0 = time.perf_counter()
 
     # ---- 启动子进程 ----
     creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
@@ -728,7 +895,7 @@ def execute(
         )
     except Exception as e:  # noqa: BLE001
         drop_tree(run_dir)
-        return False, f"无法启动脚本: {e}"
+        return None, f"无法启动脚本: {e}"
 
     try:
         p.stdin.write(json.dumps(payload, ensure_ascii=False))
@@ -757,7 +924,7 @@ def execute(
                 raise TimeoutError
     except TimeoutError:
         drop_tree(run_dir)
-        return False, f"执行超时（>{RUN_TIMEOUT_SEC}s）"
+        return None, f"执行超时（>{RUN_TIMEOUT_SEC}s）"
     except Exception:  # noqa: BLE001
         pass
 
@@ -767,7 +934,7 @@ def execute(
     if rc != 0:
         drop_tree(run_dir)
         tail = "\n".join(err_lines[-30:]).strip()
-        return False, tail or f"脚本以退出码 {rc} 结束"
+        return None, tail or f"脚本以退出码 {rc} 结束"
 
     # ---- 收集产出 ----
     produced = sorted(
@@ -777,7 +944,34 @@ def execute(
     if not produced:
         drop_tree(run_dir)
         err = "\n".join(err_lines[-10:]).strip()
-        return False, ("脚本成功退出但没有产出图片。" + ("\n" + err if err else ""))
+        return None, ("脚本成功退出但没有产出图片。" + ("\n" + err if err else ""))
+
+    return produced, None
+
+
+def _commit(
+    ws: CanvasView,
+    graph: dict,
+    prep: _Prepared,
+    produced: list[Path],
+    st: RunState,
+    settings: dict | None = None,
+    alive=None,
+) -> tuple[bool, str | None]:
+    """持锁阶段二：重绑槽位、搬文件、标脏、写状态。
+
+    跑完到写回之间隔了几十秒，这期间节点可能被删掉、画布可能没了 —— 提交前
+    先确认它还在，不在就把结果丢掉，绝不要把已经删掉的节点「复活」出来。
+    """
+    emit = st.emit
+    proc = prep.proc
+    manifest = prep.manifest
+    pid = proc["id"]
+    run_dir = prep.run_dir
+
+    if (alive is not None and not alive()) or _process(graph, pid) is None:
+        drop_tree(run_dir)
+        return False, "节点或画布已被删除，本次结果丢弃"
 
     # ---- 槽位重绑定 ----
     existing = {r.get("index"): r for r in graph["resources"] if r.get("producer") == pid}
@@ -824,7 +1018,7 @@ def execute(
     proc["error"] = None
     proc["dirty"] = False
     proc["lastRun"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    proc["lastDuration"] = round(time.perf_counter() - t0, 1)
+    proc["lastDuration"] = round(time.perf_counter() - prep.t0, 1)
 
     # ---- R5：直接下游处理节点标脏（不递归）----
     produced_ids = {r["id"] for r in graph["resources"] if r.get("producer") == pid}

@@ -331,6 +331,73 @@ def view() -> CanvasView:
     return ws().view(canvas()["id"])
 
 
+# --------------------------------------------------------------------------
+# 并行：哪些节点此刻不能动（DESIGN.md §2.2.5）
+#
+# 一条判据：两个节点能同时动，当且仅当**谁都不在对方的闭包里**（自己 + 全部上游
+# + 全部下游），也就是互不为上下游。闭包算在 engine.closure 里，包含隐式边
+# （处理节点 → 它的输出数据节点），也包含节点自己。
+# 兄弟节点共用同一个输入图是允许并行的 —— 相交的是那张输入图，不是彼此。
+#
+# 判据一律走内存里的 RUNS，不看画布上持久化的 status —— 服务崩一次，磁盘上的
+# status 会永远停在 running，那玩意儿不能当锁用。
+# --------------------------------------------------------------------------
+# 同时最多跑几个。再多也没意义：模型侧会限流，本机也扛不住 —— 每次执行都是一个
+# 独立的 python 子进程，各自要把 Pillow 和整张图读进自己的内存。
+MAX_PARALLEL_RUNS = 8
+
+
+def _node_label(g: dict, nid: str) -> str:
+    """报错信息里用的节点名（处理节点用脚本名，数据节点用图片名）。"""
+    p = engine_mod._process(g, nid)  # noqa: SLF001
+    if p is not None:
+        m = STATE["registry"].get(p.get("defId")) or {}
+        return m.get("name") or p.get("defId") or "处理节点"
+    r = engine_mod._resource(g, nid)  # noqa: SLF001
+    return (r or {}).get("name") or "数据节点"
+
+
+def _guard_nodes(g: dict, ids, action: str) -> None:
+    """这些节点里只要有一个正在执行、或处在它的上下游链上，就拒绝。
+
+    判据：谁都不在对方的闭包里。兄弟节点共用输入图不算冲突（闭包在输入节点上
+    相交是正常的），只有上下有关系才排队。闭包算法见 `engine.closure`。
+    """
+    busy = RUNS.active_pids(g["id"])
+    if not busy:
+        return
+    frozen = engine_mod.closure(g, busy)
+    for nid in ids:
+        if not nid or nid not in frozen:
+            continue
+        if nid in busy:
+            raise HTTPException(409, f"「{_node_label(g, nid)}」正在执行，等它结束")
+        raise HTTPException(
+            409,
+            f"「{_node_label(g, nid)}」和正在执行的节点互为上下游，暂时不能{action}",
+        )
+
+
+def _guard_canvas(cid: str, action: str) -> None:
+    """画布上有任何执行中的动作 → 画布本身也不能动（改名 / 删除）。"""
+    if RUNS.active_in(cid):
+        raise HTTPException(409, f"这张画布还有节点在执行，暂时不能{action}")
+
+
+def _guard_idle(action: str) -> None:
+    """整个工作目录级别的操作（换目录 / 重载脚本）—— 一个都不能在跑。"""
+    n = RUNS.count()
+    if n:
+        raise HTTPException(409, f"还有 {n} 个节点正在执行，暂时不能{action}")
+
+
+def _canvas_alive(cid: str) -> bool:
+    """收尾前确认画布还在（引擎回调，可能被别的线程调用）。"""
+    with LOCK:
+        d = STATE["doc"]
+        return d is not None and any(c.get("id") == cid for c in d.get("canvases", []))
+
+
 def canvas_list(d: dict) -> list[dict]:
     return [
         {
@@ -356,10 +423,27 @@ def _open_workspace(path: str | Path) -> Workspace:
     STATE["settings"]["lastWorkspace"] = str(w.root)
     save_settings(STATE["settings"])
     doc()                    # 读盘 + 迁移 + 定位到上次用的那个画布
+    # 落盘的 status 可能是上次被中途打断留下的「执行中」—— 这次已经没有那次
+    # 执行了，不清掉的话按钮永远是灰的（判据必须走内存里的 RUNS，见 §2.2.5）
+    stale = _reset_stale_running()
     # 开着网格吸附的话，打开时顺手把没对齐的坐标收齐（老项目/别人传过来的画布）
-    if STATE["settings"].get("snapToGrid"):
+    if stale or STATE["settings"].get("snapToGrid"):
         persist()
     return w
+
+
+def _reset_stale_running() -> int:
+    """把磁盘上残留的「执行中」改成失败。返回改了几个。"""
+    n = 0
+    for c in (STATE["doc"] or {}).get("canvases", []):
+        for p in c.get("processes", []):
+            if p.get("status") == "running":
+                p["status"] = "error"
+                p["error"] = "上次执行被中断（服务已重启）"
+                n += 1
+    if n:
+        print(f"[画布] {n} 个节点的「执行中」已重置（上次被中断）")
+    return n
 
 
 def persist() -> None:
@@ -446,7 +530,7 @@ def _auto_size_hint(out: dict, proc: dict, manifest: dict) -> dict | None:
     return info
 
 
-def _decorate(g: dict, canvas_id: str | None = None) -> dict:
+def _decorate(g: dict, canvas_id: str | None = None, copied: bool = False) -> dict:
     """给节点补上「算出来的」字段（图片文件信息 + **最终尺寸** + 「自动」尺寸的落点）。
 
     图片池是按画布分的，同一个短名（比如 A）在不同画布下是**不同的文件** ——
@@ -456,10 +540,13 @@ def _decorate(g: dict, canvas_id: str | None = None) -> dict:
     落到 `w` / `h` 上（`max(最小尺寸, 存的 ?? 初始尺寸)`），前端 `buildNodes` 直接
     用它渲染，不再自己推算 —— 原先前端 `App.jsx` 和服务端各算一遍，实测两边对
     「数据节点没存过高时算多高」给出的答案是 220 与 280，输出槽位就是这么被摆歪的。
+
+    `copied=True` 表示传进来的已经是一份快照（`state_payload` 在锁里拷的）——
+    后面这段要开图片文件读尺寸，慢，不能占着锁干。
     """
     w = STATE["workspace"]
     settings = STATE["settings"]
-    out = json.loads(json.dumps(g))
+    out = g if copied else json.loads(json.dumps(g))
     for r in out["resources"]:
         r["hasImage"] = False
         r["mtime"] = 0
@@ -505,31 +592,41 @@ def _decorate(g: dict, canvas_id: str | None = None) -> dict:
 
 
 def state_payload() -> dict:
-    w = STATE["workspace"]
-    d = doc()
-    return {
-        "workspace": str(w.root) if w is not None else None,
-        "workspaceDir": str(w.root) if w is not None else None,
-        # 资源目录（工作目录之外的只读素材来源，跟随工作目录存在 graph.json 里）。
-        # 空串 = 还没指定，前端据此显示「选择资源目录」。
-        "resourceDir": d.get("resourceDir") or "",
-        # 颜色库（同上是文档级字段，见 DESIGN.md §3.20）。顺序就是界面上的顺序 ——
-        # 新增的排最后，不做排序（用户自己记的顺序比字母序更有意义）。
-        "colors": [dict(c) for c in (d.get("colors") or [])],
-        "canvasId": d["current"],
-        "canvases": canvas_list(d),
-        "graph": _decorate(graph(), d["current"]),
-        # 这个画布还有没有「格式化所有节点」可撤销（右键菜单据此置灰那一项）
-        "canUndoFormat": d["current"] in FMT_UNDO,
-        "manifests": {k: registry_mod.public_manifest(v) for k, v in STATE["registry"].items()},
-        # 节点尺寸的唯一读取入口：每个已知类型的 {w,h,minW,minH}（见 nodespec）
-        "sizeSpec": nodespec.resolve_types(STATE["registry"], STATE["settings"]),
-        # 宽高的允许区间，前端表单的 min/max 直接用它，不再自己写
-        "sizeRange": list(nodespec.SIZE_RANGE),
-        # 「缩放吸附」步长的允许区间（同一个理由：只留服务端一份）
-        "scaleSnapRange": list(engine_mod.SCALE_SNAP_RANGE),
-        "settings": dict(STATE["settings"]),
-    }
+    """整包状态。
+
+    **图要在锁里拷一份快照再出去拆**：执行收尾（引擎往 resources 里加节点、搬文件）
+    只持锁几毫秒，但 `_decorate` 要挨个开图片文件读尺寸，慢得多 —— 拿锁干那个等于
+    把并行的收益又还回去。所以这里是「锁内 deep copy、锁外装饰」。
+    """
+    with LOCK:
+        w = STATE["workspace"]
+        d = doc()
+        cid = d["current"]
+        snap = json.loads(json.dumps(graph()))
+        payload = {
+            "workspace": str(w.root) if w is not None else None,
+            "workspaceDir": str(w.root) if w is not None else None,
+            # 资源目录（工作目录之外的只读素材来源，跟随工作目录存在 graph.json 里）。
+            # 空串 = 还没指定，前端据此显示「选择资源目录」。
+            "resourceDir": d.get("resourceDir") or "",
+            # 颜色库（同上是文档级字段，见 DESIGN.md §3.20）。顺序就是界面上的顺序 ——
+            # 新增的排最后，不做排序（用户自己记的顺序比字母序更有意义）。
+            "colors": [dict(c) for c in (d.get("colors") or [])],
+            "canvasId": cid,
+            "canvases": canvas_list(d),
+            # 这个画布还有没有「格式化所有节点」可撤销（右键菜单据此置灰那一项）
+            "canUndoFormat": cid in FMT_UNDO,
+            "manifests": {k: registry_mod.public_manifest(v) for k, v in STATE["registry"].items()},
+            # 节点尺寸的唯一读取入口：每个已知类型的 {w,h,minW,minH}（见 nodespec）
+            "sizeSpec": nodespec.resolve_types(STATE["registry"], STATE["settings"]),
+            # 宽高的允许区间，前端表单的 min/max 直接用它，不再自己写
+            "sizeRange": list(nodespec.SIZE_RANGE),
+            # 「缩放吸附」步长的允许区间（同一个理由：只留服务端一份）
+            "scaleSnapRange": list(engine_mod.SCALE_SNAP_RANGE),
+            "settings": dict(STATE["settings"]),
+        }
+    payload["graph"] = _decorate(snap, cid, copied=True)
+    return payload
 
 
 def new_id(prefix: str) -> str:
@@ -586,8 +683,10 @@ def api_state():
 @app.post("/api/registry/reload")
 def api_registry_reload():
     reload_registry()
-    # 脚本换了以后，画布上可能残留已经失效的参数值，顺手修正 —— 所有画布都要修
+    # 脚本换了以后，画布上可能残留已经失效的参数值，顺手修正 —— 所有画布都要修。
+    # 执行期间不许重载：会把正在用的 manifest 和节点参数一起换掉。
     with LOCK:
+        _guard_idle("重载脚本")
         for c in doc()["canvases"]:
             _migrate(c)
         persist()
@@ -630,6 +729,7 @@ def api_update_canvas(cid: str, payload: dict):
             raise HTTPException(404, "画布不存在")
         name = (payload or {}).get("name")
         if isinstance(name, str) and name.strip():
+            _guard_canvas(cid, "改名")
             c["name"] = name.strip()[:60]
         vp = (payload or {}).get("viewport")
         if isinstance(vp, dict):
@@ -648,6 +748,7 @@ def api_delete_canvas(cid: str):
         d = doc()
         if len(d["canvases"]) <= 1:
             raise HTTPException(400, "至少要保留一个画布")
+        _guard_canvas(cid, "删除")
         if not ws().delete_canvas(d, cid):
             raise HTTPException(404, "画布不存在")
         _focus(d)
@@ -830,6 +931,7 @@ def api_set_workspace(payload: dict):
     if not path:
         raise HTTPException(400, "路径为空")
     with LOCK:
+        _guard_idle("切换工作目录")
         _open_workspace(path)
     schedule_purge()
     return state_payload()
@@ -911,6 +1013,7 @@ def api_pick_workspace():
     if not chosen:
         return {"cancelled": True}
     with LOCK:
+        _guard_idle("切换工作目录")
         _open_workspace(chosen)
     schedule_purge()
     return state_payload()
@@ -1570,16 +1673,28 @@ async def api_import_resource(
 
     若给了 resource_id，则表示「替换某个输入图的图片」（见 DESIGN.md §2.2.2 C8）。
     """
-    v = view()
+    with LOCK:
+        cid = canvas()["id"]
+    v = ws().view(cid)
     ext = Path(file.filename or "img.png").suffix.lower()
     if ext not in IMAGE_EXTS:
         ext = ".png"
 
+    # 先把上传内容落到临时目录，**不占锁** —— 这一步可能要好几秒（几 MB 的图），
+    # 以前是边收边写目标文件、整段时间持着锁，等于一次拖图把整个服务卡住。
+    tmp = v.tmp_dir / f"upload_{uuid.uuid4().hex[:8]}{ext}"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    with tmp.open("wb") as fh:
+        while chunk := await file.read(1 << 20):
+            fh.write(chunk)
+
     with LOCK:
-        g = graph()
+        g = canvas()
         if resource_id:
+            _guard_nodes(g, [resource_id], "替换图片")
             r = next((r for r in g["resources"] if r["id"] == resource_id), None)
             if r is None:
+                drop_tree(tmp)
                 raise HTTPException(404, "数据节点不存在")
             v.delete_image(r["name"])
         else:
@@ -1593,9 +1708,7 @@ async def api_import_resource(
             g["resources"].append(r)
 
         dest = v.image_dir(create=True) / f"{r['name']}{ext}"
-        with dest.open("wb") as fh:
-            while chunk := await file.read(1 << 20):
-                fh.write(chunk)
+        shutil.move(str(tmp), str(dest))
 
         # R5 / C8：给直接下游处理节点打脏标记
         for e in g["edges"]:
@@ -1613,6 +1726,8 @@ async def api_import_resource(
 def api_delete_node(node_id: str):
     with LOCK:
         g = graph()
+        # 自己正在跑、或者和正在跑的节点互为上下游 → 不许删
+        _guard_nodes(g, [node_id], "删除")
         v = view()
         engine_mod.remove_process(g, node_id, v)
         engine_mod.remove_resource_node(g, node_id, v)
@@ -1656,6 +1771,10 @@ def api_update_process(pid: str, payload: dict):
         p = engine_mod._process(g, pid)  # noqa: SLF001
         if p is None:
             raise HTTPException(404, "处理节点不存在")
+        # 改参数、改端口数量都算「动这个节点」；纯坐标（拖拽）不算 ——
+        # 它不影响执行结果，只影响输出槽位落在哪儿（收尾时才读坐标）。
+        if "params" in payload or "ports" in payload:
+            _guard_nodes(g, [pid], "修改")
         if "params" in payload:
             p["params"] = {**(p.get("params") or {}), **(payload["params"] or {})}
             # R1：改参数不触发任何重算，只清掉上次的错误提示
@@ -1698,6 +1817,7 @@ def api_delete_port(pid: str, port_key: str):
         hit = next((s for s in specs if s["key"] == port_key), None)
         if hit is None:
             raise HTTPException(404, f"该节点没有输入口 {port_key}")
+        _guard_nodes(g, [pid], "删掉输入口")
         group = hit.get("group")
         if not group:
             raise HTTPException(400, f"{port_key} 是固定输入口，不能删除")
@@ -2026,6 +2146,7 @@ def api_create_edge(payload: dict):
         g = graph()
         if engine_mod._resource(g, src) is None or engine_mod._process(g, dst) is None:  # noqa: SLF001
             raise HTTPException(404, "节点不存在")
+        _guard_nodes(g, [src, dst], "改连线")
 
         dst_proc = engine_mod._process(g, dst)  # noqa: SLF001
         manifest = STATE["registry"].get(dst_proc["defId"])
@@ -2070,6 +2191,7 @@ def api_fill_inputs(pid: str, payload: dict):
         p = engine_mod._process(g, pid)  # noqa: SLF001
         if p is None:
             raise HTTPException(404, "处理节点不存在")
+        _guard_nodes(g, [pid], "填充输入")
         m = STATE["registry"].get(p.get("defId")) or {}
         inputs = m.get("inputs") or []
         if not inputs:
@@ -2134,6 +2256,9 @@ def api_fill_inputs(pid: str, payload: dict):
 def api_delete_edge(edge_id: str):
     with LOCK:
         g = graph()
+        edge = next((e for e in g["edges"] if e["id"] == edge_id), None)
+        if edge is not None:
+            _guard_nodes(g, [edge.get("from"), edge.get("to")], "改连线")
         g["edges"] = [e for e in g["edges"] if e["id"] != edge_id]
         persist()
     return state_payload()
@@ -2145,30 +2270,48 @@ def api_delete_edge(edge_id: str):
 @app.post("/api/processes/{pid}/execute")
 def api_execute(pid: str):
     with LOCK:
-        g = graph()
+        # 画布要在这一刻**钉死**：执行期间用户可能切到别的画布，结果仍然只能写回
+        # 这个节点自己所在的那张（docs §2.2.5）。以前用的是 STATE["graph"] 这个
+        # 跟着当前画布走的活指针 —— 那 bug 被全局锁挡着，一直没露出来。
+        c = canvas()
+        g = c
         p = engine_mod._process(g, pid)  # noqa: SLF001
         if p is None:
             raise HTTPException(404, "处理节点不存在")
+
+        # 同一个节点不许重入：两次执行会抢同一批输出名，互相覆盖文件。
+        # 判据用内存里的活动集，不看 p["status"]（那玩意儿是落盘的）。
+        if RUNS.is_active(c["id"], pid):
+            raise HTTPException(409, "这个节点正在执行")
+
+        # 上游 / 下游有任何一个在跑 → 这一整条链都不能动
+        _guard_nodes(g, [pid], "执行")
+
+        if RUNS.count() >= MAX_PARALLEL_RUNS:
+            raise HTTPException(
+                409, f"同时执行已达上限（{MAX_PARALLEL_RUNS} 个），等一个结束再试"
+            )
+
         p["status"] = "running"
         p["error"] = None
-        # 先把画布钉住：执行期间图片要写进**这个画布**的池子，即便中途切了画布也不跑偏
-        v = view()
+        v = ws().view(c["id"])
+        st = RUNS.create(c["id"], pid)   # 登记必须和上面的判断在同一把锁里
         persist()
-    st = RUNS.create(pid)
 
     def worker() -> None:
         ok, err = False, None
         try:
-            with LOCK:
-                ok, err = engine_mod.execute(
-                    v, STATE["graph"], STATE["registry"], pid, st, STATE["settings"]
-                )
-                persist()
+            ok, err = engine_mod.execute(
+                v, g, STATE["registry"], pid, st, STATE["settings"],
+                lock=LOCK,
+                alive=lambda: _canvas_alive(c["id"]),
+            )
         except Exception as e:  # noqa: BLE001
             ok, err = False, f"{type(e).__name__}: {e}"
         finally:
             with LOCK:
-                p2 = engine_mod._process(STATE["graph"], pid)  # noqa: SLF001
+                # 状态写回**同一个画布**，不管用户此刻看的是哪一张
+                p2 = engine_mod._process(g, pid)  # noqa: SLF001
                 if p2 is not None:
                     if ok:
                         p2["status"] = "done"

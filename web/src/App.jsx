@@ -237,7 +237,11 @@ export default function App() {
   const [state, setState] = useState(null)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [drawer, setDrawer] = useState(null)
+  // 执行日志：**按节点分开存**。以前是一个全局 drawer，并行执行时 A 的日志会被
+  // 追加到 B 的面板上（面板只有一份），所以现在 pid → { lines, status, error }。
+  const [drawers, setDrawers] = useState({})
+  const [drawerPid, setDrawerPid] = useState(null) // 面板当前显示哪个节点的日志
+  const stateSeq = useRef(0) // 状态的请求序号：只让最后发出的那次落地
   const [toast, setToast] = useState(null) // 画布底部那行临时提示（6 秒后自己消失）
   const toastTimer = useRef(null)
   const [showWs, setShowWs] = useState(false)
@@ -325,6 +329,19 @@ export default function App() {
     },
     [setNodes, setEdges, fitView, applyViewport],
   )
+
+  /* 只让「最后发出的那次」请求落地。
+     并发执行时，几次结束会各拉一次状态；先发后到的旧快照会把别的节点刚跑完的
+     done 又盖回 running。序号对不上就丢掉。 */
+  const applyFresh = useCallback(async () => {
+    const seq = ++stateSeq.current
+    try {
+      const s = await api.getState()
+      if (seq === stateSeq.current) applyState(s)
+    } catch {
+      /* 拉不到就等下一次（下一次结束或下次操作会再拉） */
+    }
+  }, [applyState])
 
   /* ---------------- 画布：切换 / 新建 / 改名 / 删除 ----------------
      切走之前先把当前视野记到**将要离开的那个画布**上，切过去再恢复新画布的
@@ -564,10 +581,12 @@ export default function App() {
      **默认关**，要看去 ⚙ → 设置里打开（这是界面偏好，不跟着某一次执行走）。
      关着的时候失败照样弹 toast，不看日志也不会漏掉失败这件事。 */
   const logOpen = !!state?.settings?.showLog
+  const drawer = drawerPid ? drawers[drawerPid] : null
 
   const onExecute = useCallback(
     async (pid) => {
-      setDrawer({ pid, lines: [], status: 'running', error: null })
+      setDrawers((d) => ({ ...d, [pid]: { lines: [], status: 'running', error: null } }))
+      setDrawerPid(pid)
       setNodes((ns) => ns.map((n) => (n.id === pid ? { ...n, data: { ...n.data, status: 'running' } } : n)))
       try {
         const { runId } = await api.executeNode(pid)
@@ -580,21 +599,27 @@ export default function App() {
             return
           }
           if (msg.type === 'log') {
-            setDrawer((d) => (d ? { ...d, lines: [...d.lines, msg.line] } : d))
+            setDrawers((d) =>
+              d[pid] ? { ...d, [pid]: { ...d[pid], lines: [...d[pid].lines, msg.line] } } : d,
+            )
           } else if (msg.type === 'end') {
             es.close()
-            setDrawer((d) => (d ? { ...d, status: msg.status, error: msg.error } : d))
-            if (msg.state) applyState(msg.state)
+            setDrawers((d) =>
+              d[pid] ? { ...d, [pid]: { ...d[pid], status: msg.status, error: msg.error } } : d,
+            )
             if (msg.status !== 'done' && msg.error) flash(msg.error)
+            applyFresh()
           }
         }
         es.onerror = () => es.close()
       } catch (e) {
-        setDrawer((d) => (d ? { ...d, status: 'error', error: e.message } : d))
+        // 服务端拒绝（自己/上下游正在执行、并发到上限）走这里 —— 原话弹出来
+        setDrawers((d) => ({ ...d, [pid]: { lines: [], status: 'error', error: e.message } }))
         flash(e.message)
+        applyFresh() // 节点状态以服务端为准（乐观写进去的 running 要撤掉）
       }
     },
-    [applyState, setNodes, flash],
+    [applyFresh, setNodes, flash],
   )
 
   const onDelete = useCallback((id) => deleteSelection([{ id }], []), [deleteSelection])
