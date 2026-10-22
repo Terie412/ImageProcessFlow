@@ -47,6 +47,9 @@ except Exception:  # noqa: BLE001
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = APP_ROOT / "scripts"
+# 私有 / 本地节点：同样的结构（<根>/<节点>/manifest.json），但整个目录被 .gitignore
+# 排除，**不进 git**（见 DESIGN.md §3.23）。不存在是正常状态 —— 新克隆的仓库就没有它。
+PRIVATE_SCRIPTS_DIR = APP_ROOT / "scripts_private"
 STATIC_DIR = APP_ROOT / "server" / "static"
 
 LOCK = threading.RLock()
@@ -380,7 +383,17 @@ def persist() -> None:
 
 
 def reload_registry() -> None:
-    STATE["registry"] = registry_mod.load_manifests(SCRIPTS_DIR)
+    """扫两个根：公开的 `scripts/`，再叠上私有的 `scripts_private/`（没有就跳过）。
+
+    私有那批**只在本机存在**，不进 git。启动时打一行「其中 N 个是本地的」，
+    这样「私有节点到底有没有被扫到」一眼能看出来，不用去翻文件。
+    """
+    STATE["registry"] = registry_mod.load_manifests([SCRIPTS_DIR, PRIVATE_SCRIPTS_DIR])
+    if PRIVATE_SCRIPTS_DIR.is_dir():
+        prefix = str(PRIVATE_SCRIPTS_DIR)
+        n_priv = sum(1 for v in STATE["registry"].values() if str(v.get("_dir", "")).startswith(prefix))
+        if n_priv:
+            print(f"[启动] 其中 {n_priv} 个来自 scripts_private/（私有，不进 git）")
 
 
 def _auto_size_hint(out: dict, proc: dict, manifest: dict) -> dict | None:

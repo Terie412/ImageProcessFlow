@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
-"""脚本注册表：扫描 scripts/*/manifest.json。
+"""脚本注册表：扫描 `<根>/<节点>/manifest.json`。
 
 对应 DESIGN.md §2.3「脚本注册」：新增脚本 = 放一个 .py + 更新对应 manifest。
+
+**两个根**（见 DESIGN.md §3.23）：
+
+    scripts/          公开节点，进 git
+    scripts_private/  **私有 / 本地**节点，被 .gitignore 整目录排除 —— 不会进 git
+
+两边结构完全一样，扫描逻辑也一样；私有那个不存在是**正常状态**（新克隆的仓库里就没有），
+直接跳过。两个根里出现同一个 id 时**私有覆盖公开** —— 这也是一种有用的用法：
+本地想临时改某个公开节点的行为，不用去动仓库里的那份。
 """
 from __future__ import annotations
 
@@ -9,26 +18,31 @@ import json
 from pathlib import Path
 
 
-def load_manifests(scripts_dir: str | Path) -> dict[str, dict]:
+def load_manifests(roots) -> dict[str, dict]:
+    """扫描一**个或多个**根目录，按给定顺序合并（后面的覆盖前面的）。"""
     out: dict[str, dict] = {}
-    d = Path(scripts_dir)
-    if not d.is_dir():
-        return out
-    for sub in sorted(d.iterdir()):
-        mf = sub / "manifest.json"
-        if not (sub.is_dir() and mf.is_file()):
+    dirs = [roots] if isinstance(roots, (str, Path)) else list(roots or [])
+    for root in dirs:
+        d = Path(root)
+        if not d.is_dir():
             continue
-        try:
-            m = json.loads(mf.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001
-            print(f"[registry] 跳过 {mf}: {e}")
-            continue
-        m.setdefault("id", sub.name)
-        m["_dir"] = str(sub)
-        m.setdefault("inputs", [])
-        m.setdefault("params", [])
-        m.setdefault("outputs", [])
-        out[m["id"]] = m
+        for sub in sorted(d.iterdir()):
+            mf = sub / "manifest.json"
+            if not (sub.is_dir() and mf.is_file()):
+                continue
+            try:
+                m = json.loads(mf.read_text(encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001
+                print(f"[registry] 跳过 {mf}: {e}")
+                continue
+            m.setdefault("id", sub.name)
+            m["_dir"] = str(sub)
+            m.setdefault("inputs", [])
+            m.setdefault("params", [])
+            m.setdefault("outputs", [])
+            if m["id"] in out:
+                print(f"[registry] id 冲突：{m['id']} —— {mf} 覆盖了前面那份")
+            out[m["id"]] = m
     return out
 
 
