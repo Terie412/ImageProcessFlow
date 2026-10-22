@@ -97,8 +97,10 @@ def part_a() -> None:
     manifest = json.loads((ROOT / "scripts" / "ai_image" / "manifest.json").read_text("utf-8"))
     check("manifest 里 size 参数声明了 autoFrom=input",
           A.auto_key(manifest) == "size", f"auto_key={A.auto_key(manifest)!r}")
+    opts = A.options_of(manifest, "size")
     check("选项里的空值「自动」被排除",
-          A.options_of(manifest, "size") == OPTS, str(A.options_of(manifest, "size")))
+          "" not in opts and all(A.parse_size(o) for o in opts) and len(opts) >= len(OPTS),
+          str(opts))
     check("没声明 autoFrom 的 manifest 不参与（裁剪节点）",
           A.auto_key(registry_mod.load_manifests(ROOT / "scripts").get("crop") or {}) is None)
 
@@ -128,6 +130,23 @@ def part_a() -> None:
     check("pick() 是纯函数（同一输入同一结果）", (v1, i1) == (v2, i2))
     check("pick()：没 autoFrom → None",
           A.pick({"params": [p_noauto]}, (720, 1280)) == (None, None))
+
+    # ---- 形状定档、面积定档内选哪个 ----
+    # 下拉里同一个比例有 1K / 2K 两个选项之后（1536×1536 与 2048×2048、
+    # 720×1280 与 1536×2752），只按形状最近会挑出反直觉的结果：
+    # 3840×2160 的输入被判到 1280×720、512×1024 被判到 1536×2752。
+    # 规则是**形状差不到一档就算同一个比例，档内按面积挑最近的**。
+    for (w, h), want, why in [
+        ((3840, 2160), "2752x1536", "4K 的 16:9 → 2K 档，而不是缩到 720p"),
+        ((2560, 1440), "2752x1536", "2K 的 16:9 → 2K 档"),
+        ((512, 1024), "720x1280", "1:2 别被 2K 的 0.5581 抢走 —— 档内按面积回 1K"),
+        ((3000, 2000), "2528x1696", "6M 的 3:2 → 2K 档，而不是降到 1.5K"),
+        ((1024, 768), "1024x768", "4:3 有 1K 档就别拉到 2K"),
+        ((2048, 2048), "2048x2048", "正方形几个档位按面积走"),
+        ((941, 1672), "720x1280", "9:16 的 1.5M 输入仍然回 1K 档（老行为不能变）"),
+    ]:
+        got, _ = A.pick(manifest, (w, h))
+        check(f"档内按面积：{w}×{h} → {want}", got == want, f"{why}；实际 {got}")
 
 
 # ---------------------------------------------------------------- B. 接线

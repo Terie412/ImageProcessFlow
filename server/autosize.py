@@ -26,8 +26,16 @@
 归一化 = 两个向量都缩放成「面积 = REF_AREA」，缩放后面积相同，剩下的差异
 **就只剩形状（宽高比）了** —— 而"像不像"本来就是形状说了算。
 
-面积打平时（例如 1024×1024 与 1536×1536 是同一个比例）再用**面积比**兜一层，
-选面积最接近的那个，所以 1024×1024 的输入会自动回到 1024×1024。
+## 形状定档，面积定档内选哪个
+
+形状最近只决定**落在哪一档比例**（1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 …）。
+一档里往往有 1K 和 2K 两个选项（`1536×1536` 与 `2048×2048`、`720×1280` 与 `1536×2752`），
+形状几乎一样，靠**面积**决定：取面积最接近输入的那个（`|ln(面积比)|` 最小）。
+所以 1024×1024 的输入回到 1024×1024，2048×2048 的输入去 2048×2048。
+
+容差是 `_SHAPE_BAND`（约 1% 边长误差）。它必须存在 —— 官方预设的同一个比例不等于
+精确同一个数（2K 的 16:9 是 2752×1536 = 1.7917，真值是 1.7778），差的那一点点
+不该被当成"另一种形状"，否则一模一样比例的输入会因为小数点后几位被判到另一档去。
 
 ## 没有参考图怎么办
 
@@ -55,6 +63,19 @@ _SIZE_SEP = re.compile(r"\s*[xX×*]\s*")
 # 距离打平的判定阈值：归一化空间里 1e-6 已经远小于任何两个真实选项的间距，
 # 但足以吸收浮点误差，让「同一个比例」的两个选项真的被判成平手。
 _TIE_EPS = 1e-6
+
+# 「同一个比例档」的容差（归一化空间，单位≈像素：按面积 1024² 归一后的坐标距离）。
+#
+# 预设里同一个比例未必是**精确**同一个数：官方 2K 给的是 2752×1536（1.7917），
+# 16:9 的真值是 1.7778，两者差 0.8%，在归一化空间里约 6px。若只用「欧氏距离严格最近」，
+# 那么一模一样的 16:9 输入会一直落到 1280×720（比例精确），永远轮不到 2752×1536 ——
+# 哪怕输入本来就是 3840×2160。所以把「差不到一档」的选项算作**同一比例**，
+# 再在档内按**面积**挑最接近输入的（原先只有精确打平时才走面积，`2048×2048` 这类
+# 加入之前够用，加入之后就不够了）。
+#
+# 10px ≈ 1% 的边长误差：远小于相邻两档比例的间距（4:3 与 3:2 差 11%，约 90px），
+# 又足以把 1.7917 / 1.7778、1.4906 / 1.5、0.5581 / 0.5625 认成同一档。
+_SHAPE_BAND = 10.0
 
 
 def parse_size(text) -> tuple[int, int] | None:
@@ -85,7 +106,14 @@ def _normalized(w: float, h: float) -> tuple[float, float]:
 def nearest_size(aw: int, ah: int, options: list[str]) -> str | None:
     """在 `options` 里挑离 `(aw, ah)` 最近的一个，返回**选项的原始值**。
 
-    主判据 = 归一化欧氏距离（= 形状差异）；打平时用面积比兜底。
+    两步走：
+    1. 先在归一化空间里找**形状最近**的那个，得到最小距离 `best_dist`；
+    2. 把距离在 `best_dist + _SHAPE_BAND` 以内的都当成**同一个比例档**，
+       档内改按**面积**（`|ln(面积比)|`）挑最接近输入的那个。
+
+    第 2 步是必需的：同一个比例有 1K / 2K 两个选项时（`1536×1536` 与 `2048×2048`、
+    `720×1280` 与 `1536×2752`），形状几乎一样，只有面积能决定该选哪档 ——
+    否则「输入 3840×2160 却自动出 1280×720」这种反直觉的结果会一直存在。
     """
     options = [o for o in (options or []) if parse_size(o)]
     if not options:
@@ -94,19 +122,22 @@ def nearest_size(aw: int, ah: int, options: list[str]) -> str | None:
     tw, th = _normalized(aw, ah)
     area_a = float(aw) * float(ah)
 
-    best_value: str | None = None
-    best_dist = 0.0
-    best_area_tie = 0.0
+    dists: list[tuple[float, float, str]] = []  # (形状距离, 面积对数差, 值)
     for value in options:
         w, h = parse_size(value)  # type: ignore[misc]
         uw, uh = _normalized(w, h)
-        dist = math.hypot(tw - uw, th - uh)
-        area_tie = abs(math.log((w * h) / area_a))
-        if best_value is None or dist < best_dist - _TIE_EPS or (
-            abs(dist - best_dist) <= _TIE_EPS and area_tie < best_area_tie
-        ):
-            best_value, best_dist, best_area_tie = value, dist, area_tie
-    return best_value
+        dists.append((
+            math.hypot(tw - uw, th - uh),
+            abs(math.log((w * h) / area_a)),
+            value,
+        ))
+
+    best_dist = min(d for d, _, _ in dists)
+    band = best_dist + _SHAPE_BAND
+    same_shape = [(area_tie, d, v) for d, area_tie, v in dists if d <= band + _TIE_EPS]
+    # 先比面积，面积也打平（同一个比例、同一个面积的不同写法）时比形状，最后按选项顺序。
+    area_tie, _, value = min(same_shape, key=lambda t: (t[0], t[1]))
+    return value
 
 
 def dims_of_path(path) -> tuple[int, int] | None:
