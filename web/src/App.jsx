@@ -45,10 +45,31 @@ function specOf(state, key) {
   return sp[key] || (String(key).startsWith('process:') ? sp.process : sp.resource) || null
 }
 
+/* 同类的列表一律**按名字**排（右键菜单的处理节点、⚙ 里的节点尺寸）。
+ *
+ * 两条规矩合起来，才是中文用户预期的那个「A→Z、拼音序」：
+ *
+ * 1. **英文 / 数字开头的排前面**。`zh` collation 会把汉字排在拉丁字母**前面**
+ *    （实测 `'AI' vs '按'` 返回 1），不单独处理的话「AI 生图」会掉到「正方形扩展」后面 ——
+ *    看着像没排。Windows 资源管理器、多数中文 App 也都是英文在前。
+ * 2. **汉字之间按拼音**。必须显式给 `'zh'`：不传 locale 用的是系统默认，
+ *    系统要是 en-US，中文就退化成按 Unicode 码位排（"张"会跑到"阿"前面）。
+ *
+ * `numeric` 让「AI 生图 2」排在「AI 生图 10」前面，而不是逐位比字符。
+ * 顺序只影响显示，`Object.values()` 的原始顺序不动。 */
+const byName = (a, b) => {
+  const x = String(a.name || a.id || '')
+  const y = String(b.name || b.id || '')
+  const ax = /^[\x00-\x7f]/.test(x) ? 0 : 1
+  const ay = /^[\x00-\x7f]/.test(y) ? 0 : 1
+  if (ax !== ay) return ax - ay // 英文/数字开头的在前
+  return x.localeCompare(y, 'zh', { numeric: true }) // 汉字按拼音
+}
+
 /* 设置浮层里要列出的行：数据节点 + 每个已注册的处理节点类型。
    一律以服务端下发的 sizeSpec 为准 —— 那边没有的类型就不列。 */
 function sizeRows(state) {
-  const mans = Object.values(state?.manifests || {}).sort((a, b) => a.id.localeCompare(b.id))
+  const mans = Object.values(state?.manifests || {}).sort(byName)
   return [
     { key: 'resource', label: '数据节点' },
     ...mans.map((m) => ({ key: `process:${m.id}`, label: m.name || m.id })),
@@ -1155,10 +1176,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [deleteSelection, copySelection, pasteAtCenter])
 
-  const manifests = useMemo(
-    () => Object.values(state?.manifests || {}).sort((a, b) => a.id.localeCompare(b.id)),
-    [state],
-  )
+  // 右键菜单「处理节点」那一列：按名字排（见 byName 的注释）
+  const manifests = useMemo(() => Object.values(state?.manifests || {}).sort(byName), [state])
 
   // 当前画布 —— 顶栏下拉按钮上显示的就是它
   const curCanvas = useMemo(
