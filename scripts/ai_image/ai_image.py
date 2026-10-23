@@ -21,15 +21,21 @@
 """
 from __future__ import annotations
 
-import base64
-import json
-import mimetypes
-import os
-import re
-import sys
 import time
-import urllib.error
-import urllib.request
+
+# 进程内能取到的**最早**时刻，故意放在其余 import 之前 ——
+# 「脚本总计」从这里起算，才把 import 这些开销也纳进来（见 `print_timeline()`）。
+_T_BOOT = time.perf_counter()
+
+import base64  # noqa: E402
+import json  # noqa: E402
+import mimetypes  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import sys  # noqa: E402
+import unicodedata  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
 
 # --------------------------------------------------------------------------
 # 后端常量
@@ -70,6 +76,54 @@ TRANSPARENT_SUFFIX = (
 
 def log(msg: str = "") -> None:
     print(msg, flush=True)
+
+
+# --------------------------------------------------------------------------
+# 分段计时
+# --------------------------------------------------------------------------
+# 节点右上角那个「28.8s」是引擎从**拉起子进程**量到**文件搬进图片池**的墙钟时间，
+# 中间发生的事它一概不知。所以脚本这边把能自己量的段逐段打出来，末尾再给一张
+# 对齐的时间轴 —— 「慢在排队、慢在下载、还是慢在本地」一眼能看出来。
+#
+# 量不到的两段由引擎补：`spawn → 首行日志`（解释器冷启动 + import）和
+# `子进程退出 → 文件搬完`（收尾）。两边合起来正好是界面上的那个数。
+_PHASES: list[tuple[str, float]] = []
+
+
+def phase(label: str, since: float) -> float:
+    """收一段耗时：打一行 `[计时]`、记进时间轴，返回当前时刻给下一段接着用。"""
+    now = time.perf_counter()
+    secs = now - since
+    _PHASES.append((label, secs))
+    log(f"[计时] {label}: {secs:.2f} 秒")
+    return now
+
+
+def _disp_width(s: str) -> int:
+    """中文/全角按 2 格算 —— 不然时间轴那一列歪得没法看。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in s)
+
+
+def print_timeline(total: float) -> None:
+    """把各段耗时打成一张时间轴。
+
+    `total` = 从进程入口到**现在**的墙钟时间（`_T_BOOT` 起算）。
+    各段之和通常略小于它：差值是解释器起来、import、以及各段之间的校验逻辑 ——
+    统一归到「未归类」那一行，不硬凑。
+    """
+    if not _PHASES:
+        return
+    rows = list(_PHASES)
+    rows.append(("未归类（解释器启动 / import / 校验）", max(0.0, total - sum(s for _, s in rows))))
+    name_w = max(_disp_width(label) for label, _ in rows)
+
+    log("")
+    log("[计时] ────── 时间轴 ──────")
+    for label, secs in rows:
+        share = f"{secs / total * 100:5.1f}%" if total > 0 else "    - "
+        pad = " " * (name_w - _disp_width(label))
+        log(f"[计时] {label}{pad}  {secs:6.2f} 秒  {share}")
+    log(f"[计时] 总计（进程入口 → 脚本结束）: {total:.2f} 秒")
 
 
 # --------------------------------------------------------------------------
@@ -194,7 +248,7 @@ def call_qwen(api_key: str, body: dict) -> dict:
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {e.code}\n{detail[:2000]}") from e
-    log(f"[计时] 生成请求耗时: {time.perf_counter() - t0:.2f} 秒")
+    phase("生成请求（云端排队 + 推理）", t0)
     return result
 
 
@@ -272,6 +326,7 @@ def encode_multipart(fields: dict, files: list[tuple[str, str, bytes]]) -> tuple
 
 def call_openai(api_key: str, params: dict, images: list[str]) -> list[bytes]:
     """有参考图走 edits（multipart），没有走 generations（JSON）。"""
+    t = time.perf_counter()
     fields = openai_fields(params)
 
     if images:
@@ -286,6 +341,7 @@ def call_openai(api_key: str, params: dict, images: list[str]) -> list[bytes]:
         body = json.dumps(fields, ensure_ascii=False).encode("utf-8")
         url = f"{OPENAI_BASE_URL}/images/generations"
         ctype = "application/json"
+    t = phase("组装请求（读参考图 + multipart）" if images else "组装请求（JSON）", t)
 
     req = urllib.request.Request(
         url,
@@ -305,8 +361,11 @@ def call_openai(api_key: str, params: dict, images: list[str]) -> list[bytes]:
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {e.code}\n{detail[:2000]}") from e
-    log(f"[计时] 生成请求耗时: {time.perf_counter() - t0:.2f} 秒")
-    return decode_b64_images(result)
+    t = phase("生成请求（中转站排队 + 推理）", t0)
+
+    blobs = decode_b64_images(result)
+    phase("解码 base64", t)
+    return blobs
 
 
 def decode_b64_images(result: dict) -> list[bytes]:
@@ -331,6 +390,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    t = time.perf_counter()
     raw = sys.stdin.read()
     if not raw.strip():
         print("stdin 没有收到 JSON payload", file=sys.stderr)
@@ -369,6 +429,7 @@ def main() -> int:
             return 1
 
     size_value = normalize_size(params.get(SIZE_KEY[backend]), backend)
+    t = phase("读入 payload + 校验", t)
 
     log(f"[后端] {BACKEND_LABEL[backend]}")
     log(f"[模型] {model}")
@@ -382,23 +443,30 @@ def main() -> int:
         log("[提示词] 已追加透明背景要求")
     log("")
 
-    t_all = time.perf_counter()
     try:
         if backend == "gpt":
-            blobs = call_openai(api_key, params, images)
+            blobs = call_openai(api_key, params, images)   # 内部各段自测
         else:
+            t_req = time.perf_counter()
             body = build_qwen_body(params, images)
+            # 参考图越大这段越久：请求体里塞的是整张图的 base64（约 1.37 倍原体积）
+            phase("组装请求（读参考图 + base64）", t_req)
             urls = extract_qwen_urls(call_qwen(api_key, body))
+            t_dl = time.perf_counter()
             blobs = [fetch_bytes(u) for u in urls]
+            kb = sum(len(b) for b in blobs) / 1024
+            phase(f"下载图片（{len(blobs)} 张，{kb:.0f} KB）", t_dl)
     except Exception as e:  # noqa: BLE001
+        print_timeline(time.perf_counter() - _T_BOOT)   # 失败也给出时间分布：卡在哪一段一眼可见
         print(str(e), file=sys.stderr)
         return 1
 
     log(f"[结果] 收到 {len(blobs)} 张图片")
+    t = time.perf_counter()
     write_outputs(output_dir, blobs)
+    phase("写盘", t)
 
-    log("")
-    log(f"[计时] 总耗时: {time.perf_counter() - t_all:.2f} 秒")
+    print_timeline(time.perf_counter() - _T_BOOT)
     return 0
 
 

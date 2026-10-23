@@ -702,7 +702,10 @@ class _Prepared:
     中间那段（子进程全程）**不碰 graph**，所以才能不持锁。
     """
 
-    __slots__ = ("proc", "manifest", "specs", "params", "inputs", "run_dir", "payload", "script", "t0")
+    __slots__ = (
+        "proc", "manifest", "specs", "params", "inputs", "run_dir", "payload", "script",
+        "t0", "t_first", "t_exit",
+    )
 
     def __init__(self, proc, manifest, specs, params, inputs, run_dir, payload, script):
         self.proc = proc
@@ -713,7 +716,14 @@ class _Prepared:
         self.run_dir = run_dir
         self.payload = payload
         self.script = script
+        # 三个时刻，把「界面上那个耗时」拆成 启动 / 子进程 / 收尾 三段：
+        #   t0      —— 拉起子进程之前（lastDuration 从这儿算）
+        #   t_first —— 子进程吐出第一行日志（= 解释器冷启动 + import + 读 payload）
+        #   t_exit  —— 子进程退出（之后只剩扫产出、搬文件、写状态）
+        # 脚本内部各段由脚本自己打 `[计时]`，这边只负责它量不到的两头（见 _emit_timing）。
         self.t0 = 0.0
+        self.t_first = 0.0
+        self.t_exit = 0.0
 
 
 def execute(
@@ -738,10 +748,15 @@ def execute(
     """
     gate = lock if lock is not None else contextlib.nullcontext()
 
+    t_enter = time.perf_counter()
     with gate:
         prep, err = _prepare(ws, graph, registry, pid, st, settings)
     if prep is None:
         return False, err
+    st.emit(
+        f"[engine][计时] 准备（持锁：校验输入 / 算尺寸 / 开临时目录）: "
+        f"{time.perf_counter() - t_enter:.2f} 秒 —— 发生在节点耗时起算之前，不在那个数里"
+    )
 
     produced, err = _run(prep, st)          # ← 这一段不持锁
     if produced is None:
@@ -877,7 +892,6 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
 
     # 从这里开始计时，覆盖子进程全程（含模型调用与图片下载）
     prep.t0 = time.perf_counter()
-
     # ---- 启动子进程 ----
     creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
     try:
@@ -918,6 +932,14 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
     deadline = time.time() + RUN_TIMEOUT_SEC
     try:
         for line in p.stdout:  # type: ignore[union-attr]
+            if not prep.t_first:
+                # 首行到达 = 解释器起来了、模块 import 完了、payload 读进去了。
+                # 这一段本地开销（Windows 上尤其明显）脚本自己量不到，只能从外面掐。
+                prep.t_first = time.perf_counter()
+                emit(
+                    f"[engine][计时] 启动（spawn → 首行日志）: "
+                    f"{prep.t_first - prep.t0:.2f} 秒"
+                )
             emit(line.rstrip())
             if time.time() > deadline:
                 p.kill()
@@ -929,6 +951,7 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
         pass
 
     rc = p.wait()
+    prep.t_exit = time.perf_counter()
     t_err.join(timeout=5)
 
     if rc != 0:
@@ -947,6 +970,29 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
         return None, ("脚本成功退出但没有产出图片。" + ("\n" + err if err else ""))
 
     return produced, None
+
+
+def _emit_timing(emit, prep: "_Prepared", t_done: float) -> None:
+    """把 `lastDuration` 拆成三段打出来，和脚本内那张时间轴对账。
+
+    三段是**互斥且刚好拼满**的（都是同一把 `perf_counter` 上的时刻相减）：
+
+        启动   t0 → t_first   拉起进程 + 解释器冷启动 + import + 读 payload
+        子进程 t_first → t_exit  脚本内部各段（生成请求 / 下载 / 写盘…）
+        收尾   t_exit → t_done   扫产出 + 搬文件进图片池 + 写状态
+
+    子进程那段能再往下拆，看脚本自己打的 `[计时]` —— 引擎不解析日志，
+    也正因为不解析，这段对任何脚本都通用（DESIGN.md §2.2.2）。
+    """
+    t_first = prep.t_first or prep.t0
+    t_exit = prep.t_exit or t_first
+    launch = t_first - prep.t0
+    child = t_exit - t_first
+    settle = t_done - t_exit
+    emit(
+        f"[engine][计时] 合计 {settle + child + launch:.1f} 秒 = "
+        f"启动 {launch:.2f} + 子进程 {child:.1f} + 收尾 {settle:.2f}"
+    )
 
 
 def _commit(
@@ -1018,7 +1064,9 @@ def _commit(
     proc["error"] = None
     proc["dirty"] = False
     proc["lastRun"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    proc["lastDuration"] = round(time.perf_counter() - prep.t0, 1)
+    t_done = time.perf_counter()
+    proc["lastDuration"] = round(t_done - prep.t0, 1)
+    _emit_timing(emit, prep, t_done)
 
     # ---- R5：直接下游处理节点标脏（不递归）----
     produced_ids = {r["id"] for r in graph["resources"] if r.get("producer") == pid}
