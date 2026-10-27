@@ -1,0 +1,56 @@
+{
+  "id": "halo",
+  "name": "晕染",
+  "entry": "halo.py",
+  "inputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "dynamic": true,
+      "label": "输入图",
+      "count": 1,
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  ],
+  "params": [
+    {
+      "key": "color",
+      "type": "color",
+      "default": "#ffffff",
+      "label": "颜色",
+      "width": "narrow"
+    },
+    {
+      "key": "spread",
+      "type": "number",
+      "default": 24,
+      "min": 0,
+      "max": 300,
+      "step": 1,
+      "label": "扩散范围"
+    },
+    {
+      "key": "density",
+      "type": "number",
+      "default": 70,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "label": "浓度"
+    }
+  ],
+  "outputs": [
+    {
+      "key": "image",
+      "type": "image",
+      "multi": true
+    }
+  ],
+  "size": {
+    "defaultWidth": 280,
+    "defaultHeight": 220
+  },
+  "_note": "按源图的 **Alpha** 长一圈贴着字形的晕染，垫在原图下面再输出（画布尺寸不变）。「扩散范围」= 从字形边缘往外伸多少像素（实测延伸 ≈ 填的数值），「浓度」= 最浓处的不透明度（模糊场先按峰值归一化，所以细笔画配大扩散也铺得满）。**只认透明**：喂不带 Alpha 的图（或 alpha 全不透明的图）晕染会被整个盖住、等于白做，日志会点明。晕染伸出画布的部分被裁掉 —— 要留边先用「调整分辨率」把画布做大。多输入逐张处理，几张进几张出；带 Alpha 一律 PNG，不带则跟随原图格式。"
+}
