@@ -2210,7 +2210,7 @@ def api_create_edge(payload: dict):
         if want == "video" and src_media != "video":
             raise HTTPException(400, "这个输入口只接视频节点")
         if want != "video" and src_media == "video":
-            raise HTTPException(400, "这个输入口只接图片，视频节点接不进来（视频请接「AI 视频编辑」）")
+            raise HTTPException(400, "这个输入口只接图片，视频节点接不进来")
 
         # 一个输入口只能接一个来源
         for e in list(g["edges"]):

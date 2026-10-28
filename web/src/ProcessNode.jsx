@@ -107,8 +107,6 @@ export default function ProcessNode({ id, data, selected }) {
      参数值本身不在这里过滤 —— 另一套的值一直躺在 params 里（服务端建节点时会把
      manifest 里所有 key 都初始化），切回来还在，不会丢。 */
   const allSpecs = manifest?.params || []
-  // 这个节点自己管润色（manifest 里有 `polish` 开关）—— 见下面 prompt-actions 的说明
-  const selfPolish = allSpecs.some((s) => s.key === 'polish')
   const curBackend = (allSpecs.find((s) => s.key === 'model')?.options || [])
     .map((o) => (typeof o === 'string' ? { value: o } : o))
     .find((o) => o.value === params.model)?.backend
@@ -491,20 +489,14 @@ export default function ProcessNode({ id, data, selected }) {
                     撤销
                   </button>
                 ) : null}
-                {/* manifest 里带 `polish` 布尔参数的节点**自己处理润色**（AI 视频编辑：
-                    每帧独立润色，在后台逐帧做），这里就不再给一个「润色按钮」——
-                    两者同时存在的话，用户按了按钮只会得到「一次性润色」，
-                    与那个开关的语义冲突。见 scripts_private/ai_video_edit 的 manifest。 */}
-                {selfPolish ? null : (
-                  <button
-                    className="mini-btn nodrag"
-                    title="让文本模型结合参考图改写这条提示词"
-                    disabled={polishing}
-                    onClick={doPolish}
-                  >
-                    {polishing ? '润色中…' : '润色'}
-                  </button>
-                )}
+                <button
+                  className="mini-btn nodrag"
+                  title="让文本模型结合参考图改写这条提示词"
+                  disabled={polishing}
+                  onClick={doPolish}
+                >
+                  {polishing ? '润色中…' : '润色'}
+                </button>
               </div>
             </div>
           ) : null}

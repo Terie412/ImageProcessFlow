@@ -145,34 +145,14 @@ def dims_of_path(path) -> tuple[int, int] | None:
 
     只在 PIL 可用时工作；PIL 缺失或文件坏掉都退化成 None —— 上层会当作
     「没有参考图」处理，不会因此让执行挂掉。
-
-    视频（mp4 等）PIL 当然打不开，2026-10-28 起改用 ffprobe 兜一层 —— 输入口接的
-    可能是视频节点，「尺寸 = 自动」得按**源视频**的宽高比挑预设，不然会退化成
-    「交回模型自选」。扩展名判断先做一遍，免得每张图都白跑一次 ffprobe。
     """
     try:
         from PIL import Image
     except Exception:  # noqa: BLE001
-        Image = None  # type: ignore[assignment]
-    if Image is not None:
-        try:
-            with Image.open(path) as im:
-                w, h = im.size
-            if w and h:
-                return (int(w), int(h))
-        except Exception:  # noqa: BLE001
-            pass
-    # 走到这里：PIL 不可用、或者这不是一张图 —— 按视频再试一次
+        return None
     try:
-        from pathlib import Path
-
-        import media
-        from workspace import VIDEO_EXTS
-
-        if Path(path).suffix.lower() not in VIDEO_EXTS:
-            return None
-        info = media.probe(path) or {}
-        w, h = info.get("width"), info.get("height")
+        with Image.open(path) as im:
+            w, h = im.size
         return (int(w), int(h)) if w and h else None
     except Exception:  # noqa: BLE001
         return None

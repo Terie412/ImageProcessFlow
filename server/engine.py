@@ -29,13 +29,8 @@ import media as media_mod
 import nodespec
 import registry as registry_mod
 
-# 默认执行超时（秒）。**可以被 manifest 的 `timeoutSec` 覆盖** ——
-# 逐帧调模型的节点（AI 视频编辑）动辄几十分钟，统一 15 分钟会把它一刀切掉。
+# 默认执行超时（秒）
 RUN_TIMEOUT_SEC = 900
-
-# 引擎所在目录 / 仓库根 —— 传给脚本的 `services` 里要用（见 _prepare）
-SERVER_DIR = Path(__file__).resolve().parent
-APP_ROOT = SERVER_DIR.parent
 
 # 输出槽位落点：**按节点实际尺寸推算**，不能写死偏移量。
 # 早期写死 380/210，那是按 280 宽的处理节点算的；节点一旦被调大（默认已到 600 宽、
@@ -861,24 +856,7 @@ def _prepare(
     # ---- 临时目录 ----
     run_dir = ws.tmp_dir / uuid.uuid4().hex[:12]
     run_dir.mkdir(parents=True, exist_ok=True)
-    # `services`：脚本**可能**用得上的本机服务位置。目前只有「逐帧润色」在用 ——
-    # 视频节点要在子进程里对每一帧单独调文本模型，而润色的提示词模板、棋盘格合成、
-    # MODEL_NOTES 都在服务端那套代码里。与其在脚本里抄一遍，不如把位置告诉它，
-    # 让它 `sys.path` 一下直接 import（见 scripts_private/ai_video_edit）。
-    # **只传位置、不传 key**：key 仍旧由脚本自己从环境变量取，不落进 payload。
-    settings = settings or {}
-    services = {
-        "serverDir": str(SERVER_DIR),
-        "notesPath": str(APP_ROOT / "MODEL_NOTES.md"),
-        "textKeyEnv": str(settings.get("textModelKeyEnv") or ""),
-        "textModel": str(settings.get("textModelName") or ""),
-    }
-    payload = {
-        "params": params,
-        "inputs": inputs,
-        "output_dir": str(run_dir),
-        "services": services,
-    }
+    payload = {"params": params, "inputs": inputs, "output_dir": str(run_dir)}
 
     script = Path(manifest["_dir"]) / manifest.get("entry", "")
     if not script.is_file():
@@ -902,19 +880,6 @@ def _prepare(
         _Prepared(proc, manifest, specs, params, inputs, run_dir, payload, script),
         None,
     )
-
-
-def _timeout_of(manifest: dict | None) -> float:
-    """这个节点允许跑多久（秒）。manifest 没写 / 写了非法值 → `RUN_TIMEOUT_SEC`。
-
-    为什么按 manifest 而不是按「节点是不是视频」硬编码：超时的本质是**脚本自己知道
-    它要跑多久**（逐帧处理 vs 一次请求差两个数量级），让脚本声明比让引擎猜靠谱。
-    """
-    try:
-        v = float((manifest or {}).get("timeoutSec") or 0)
-    except (TypeError, ValueError):
-        return float(RUN_TIMEOUT_SEC)
-    return v if v > 0 else float(RUN_TIMEOUT_SEC)
 
 
 def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
@@ -966,7 +931,7 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
     t_err = threading.Thread(target=drain_stderr, daemon=True)
     t_err.start()
 
-    deadline = time.time() + _timeout_of(prep.manifest)
+    deadline = time.time() + RUN_TIMEOUT_SEC
     try:
         for line in p.stdout:  # type: ignore[union-attr]
             if not prep.t_first:
@@ -983,7 +948,7 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
                 raise TimeoutError
     except TimeoutError:
         drop_tree(run_dir)
-        return None, f"执行超时（>{_timeout_of(prep.manifest):.0f}s）"
+        return None, f"执行超时（>{RUN_TIMEOUT_SEC}s）"
     except Exception:  # noqa: BLE001
         pass
 
