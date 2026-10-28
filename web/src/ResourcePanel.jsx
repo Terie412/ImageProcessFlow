@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from './api'
 import ImageViewer from './ImageViewer'
+import VideoViewer from './VideoViewer'
 
 /* 拖拽资源文件用的自定义 MIME。
  *
@@ -73,6 +74,16 @@ const FileIco = () => (
   </svg>
 )
 
+/* 视频文件：面板里不抽帧（那是画布池的事，见 server/media.py）——
+   资源目录只读，在这里为了一个缩略图往人家目录里写东西是不可能的，
+   而每行都跑一次 ffmpeg 又太贵。所以只给一个「胶片」图标区分类型。 */
+const VideoIco = () => (
+  <svg className="res-ico video" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+    <rect x="2" y="3.5" width="12" height="9" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M6.8 6.2v3.6l3-1.8z" fill="currentColor" />
+  </svg>
+)
+
 /* 一层目录的行。递归渲染展开的子目录 —— 数据都在父组件的 tree / expanded 里。 */
 function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu, onPreview }) {
   const node = tree[rel]
@@ -103,16 +114,24 @@ function Rows({ rel, depth, tree, expanded, onToggle, onDragStart, onMenu, onPre
             </div>
           ) : (
             <div
-              className={`res-row file${e.isImage ? ' img' : ''}`}
+              className={`res-row file${e.isImage || e.isVideo ? ' img' : ''}`}
               style={pad}
-              title={e.isImage ? `${e.name}\n拖到画布即新建数据节点 · 双击预览` : `${e.name}\n（不是图片，不能拖）`}
-              draggable={!!e.isImage}
-              onDragStart={e.isImage ? (ev) => onDragStart(ev, e) : undefined}
-              onDoubleClick={e.isImage ? () => onPreview(e) : undefined}
+              title={
+                e.isImage
+                  ? `${e.name}\n拖到画布即新建数据节点 · 双击预览`
+                  : e.isVideo
+                    ? `${e.name}\n拖到画布即新建视频节点 · 双击播放`
+                    : `${e.name}\n（不是图片或视频，不能拖）`
+              }
+              draggable={!!(e.isImage || e.isVideo)}
+              onDragStart={e.isImage || e.isVideo ? (ev) => onDragStart(ev, e) : undefined}
+              onDoubleClick={e.isImage || e.isVideo ? () => onPreview(e) : undefined}
               onContextMenu={(ev) => onMenu(ev, { type: 'file', rel: e.rel, name: e.name })}
             >
               {e.isImage ? (
                 <img className="res-thumb" src={api.resourceRawUrl(e.rel, e.mtime)} alt="" loading="lazy" draggable={false} />
+              ) : e.isVideo ? (
+                <VideoIco />
               ) : (
                 <FileIco />
               )}
@@ -259,7 +278,12 @@ export default function ResourcePanel({ state, applyState, flash }) {
   }
 
   // 双击图片文件 → 大图查看器。先把图开出来（框会立刻显示），图片信息随后补上
+  // 视频文件 → 播放器（服务端 raw 路由支持 Range，能直接拖进度条）
   const openPreview = async (entry) => {
+    if (entry.isVideo) {
+      setPreview({ rel: entry.rel, name: entry.name, mtime: entry.mtime, video: true, info: null })
+      return
+    }
     setPreview({ rel: entry.rel, name: entry.name, mtime: entry.mtime, info: null })
     try {
       const info = await api.resourceInfo(entry.rel)
@@ -543,23 +567,37 @@ export default function ResourcePanel({ state, applyState, flash }) {
           )
         : null}
 
-      {/* 双击图片文件打开的大图查看器 —— 与数据节点双击是同一个组件 */}
+      {/* 双击图片文件打开的大图查看器 —— 与数据节点双击是同一个组件；
+          视频走 VideoViewer（同一个播放器，只是地址来自资源目录的 raw 路由） */}
       {preview
         ? createPortal(
-            <ImageViewer
-              src={api.resourceRawUrl(preview.rel, preview.mtime)}
-              badge={preview.name}
-              subtitle={
-                preview.rel.includes('/')
-                  ? preview.rel.slice(0, preview.rel.lastIndexOf('/'))
-                  : '资源目录根'
-              }
-              width={preview.info?.width}
-              height={preview.info?.height}
-              format={preview.info?.format}
-              alpha={preview.info?.alpha}
-              onClose={() => setPreview(null)}
-            />,
+            preview.video ? (
+              <VideoViewer
+                src={api.resourceRawUrl(preview.rel, preview.mtime)}
+                badge={preview.name}
+                subtitle={
+                  preview.rel.includes('/')
+                    ? preview.rel.slice(0, preview.rel.lastIndexOf('/'))
+                    : '资源目录根'
+                }
+                onClose={() => setPreview(null)}
+              />
+            ) : (
+              <ImageViewer
+                src={api.resourceRawUrl(preview.rel, preview.mtime)}
+                badge={preview.name}
+                subtitle={
+                  preview.rel.includes('/')
+                    ? preview.rel.slice(0, preview.rel.lastIndexOf('/'))
+                    : '资源目录根'
+                }
+                width={preview.info?.width}
+                height={preview.info?.height}
+                format={preview.info?.format}
+                alpha={preview.info?.alpha}
+                onClose={() => setPreview(null)}
+              />
+            ),
             document.body,
           )
         : null}

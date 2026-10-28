@@ -23,12 +23,19 @@ import uuid
 from collections import deque
 from pathlib import Path
 
-from workspace import IMAGE_EXTS, CanvasView, drop_tree
+from workspace import MEDIA_EXTS, VIDEO_EXTS, CanvasView, drop_tree
 import autosize
+import media as media_mod
 import nodespec
 import registry as registry_mod
 
+# 默认执行超时（秒）。**可以被 manifest 的 `timeoutSec` 覆盖** ——
+# 逐帧调模型的节点（AI 视频编辑）动辄几十分钟，统一 15 分钟会把它一刀切掉。
 RUN_TIMEOUT_SEC = 900
+
+# 引擎所在目录 / 仓库根 —— 传给脚本的 `services` 里要用（见 _prepare）
+SERVER_DIR = Path(__file__).resolve().parent
+APP_ROOT = SERVER_DIR.parent
 
 # 输出槽位落点：**按节点实际尺寸推算**，不能写死偏移量。
 # 早期写死 380/210，那是按 280 宽的处理节点算的；节点一旦被调大（默认已到 600 宽、
@@ -854,7 +861,24 @@ def _prepare(
     # ---- 临时目录 ----
     run_dir = ws.tmp_dir / uuid.uuid4().hex[:12]
     run_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"params": params, "inputs": inputs, "output_dir": str(run_dir)}
+    # `services`：脚本**可能**用得上的本机服务位置。目前只有「逐帧润色」在用 ——
+    # 视频节点要在子进程里对每一帧单独调文本模型，而润色的提示词模板、棋盘格合成、
+    # MODEL_NOTES 都在服务端那套代码里。与其在脚本里抄一遍，不如把位置告诉它，
+    # 让它 `sys.path` 一下直接 import（见 scripts_private/ai_video_edit）。
+    # **只传位置、不传 key**：key 仍旧由脚本自己从环境变量取，不落进 payload。
+    settings = settings or {}
+    services = {
+        "serverDir": str(SERVER_DIR),
+        "notesPath": str(APP_ROOT / "MODEL_NOTES.md"),
+        "textKeyEnv": str(settings.get("textModelKeyEnv") or ""),
+        "textModel": str(settings.get("textModelName") or ""),
+    }
+    payload = {
+        "params": params,
+        "inputs": inputs,
+        "output_dir": str(run_dir),
+        "services": services,
+    }
 
     script = Path(manifest["_dir"]) / manifest.get("entry", "")
     if not script.is_file():
@@ -878,6 +902,19 @@ def _prepare(
         _Prepared(proc, manifest, specs, params, inputs, run_dir, payload, script),
         None,
     )
+
+
+def _timeout_of(manifest: dict | None) -> float:
+    """这个节点允许跑多久（秒）。manifest 没写 / 写了非法值 → `RUN_TIMEOUT_SEC`。
+
+    为什么按 manifest 而不是按「节点是不是视频」硬编码：超时的本质是**脚本自己知道
+    它要跑多久**（逐帧处理 vs 一次请求差两个数量级），让脚本声明比让引擎猜靠谱。
+    """
+    try:
+        v = float((manifest or {}).get("timeoutSec") or 0)
+    except (TypeError, ValueError):
+        return float(RUN_TIMEOUT_SEC)
+    return v if v > 0 else float(RUN_TIMEOUT_SEC)
 
 
 def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
@@ -929,7 +966,7 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
     t_err = threading.Thread(target=drain_stderr, daemon=True)
     t_err.start()
 
-    deadline = time.time() + RUN_TIMEOUT_SEC
+    deadline = time.time() + _timeout_of(prep.manifest)
     try:
         for line in p.stdout:  # type: ignore[union-attr]
             if not prep.t_first:
@@ -946,7 +983,7 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
                 raise TimeoutError
     except TimeoutError:
         drop_tree(run_dir)
-        return None, f"执行超时（>{RUN_TIMEOUT_SEC}s）"
+        return None, f"执行超时（>{_timeout_of(prep.manifest):.0f}s）"
     except Exception:  # noqa: BLE001
         pass
 
@@ -960,14 +997,16 @@ def _run(prep: _Prepared, st: RunState) -> tuple[list[Path] | None, str | None]:
         return None, tail or f"脚本以退出码 {rc} 结束"
 
     # ---- 收集产出 ----
+    # 图片和视频都收：脚本按自己的类型产出，后缀说明它是哪种（见 _commit 里对
+    # `media` 的判定）。一个脚本同时吐两种也允许 —— 输出槽位不关心类型。
     produced = sorted(
-        [f for f in run_dir.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTS],
+        [f for f in run_dir.iterdir() if f.is_file() and f.suffix.lower() in MEDIA_EXTS],
         key=lambda f: _natural_key(f.name),
     )
     if not produced:
         drop_tree(run_dir)
         err = "\n".join(err_lines[-10:]).strip()
-        return None, ("脚本成功退出但没有产出图片。" + ("\n" + err if err else ""))
+        return None, ("脚本成功退出但没有产出图片或视频。" + ("\n" + err if err else ""))
 
     return produced, None
 
@@ -1033,20 +1072,26 @@ def _commit(
 
     for i, src in enumerate(produced):
         r = existing.get(i)
+        is_video = src.suffix.lower() in VIDEO_EXTS
         if r is None:
             r = {
                 "id": new_id("r"),
                 "name": ws.alloc_name(graph),
                 "kind": "output",
+                "media": "video" if is_video else "image",
                 "producer": pid,
                 "index": i,
                 "x": base_x,
                 "y": cursor_y,
             }
             graph["resources"].append(r)
-            emit(f"[engine] 新增输出槽位 #{i} → 图片「{r['name']}」")
+            emit(
+                f"[engine] 新增输出槽位 #{i} → "
+                f"{'视频' if is_video else '图片'}「{r['name']}」"
+            )
         else:
-            ws.delete_image(r["name"])  # 原地刷新：删掉旧文件
+            ws.delete_image(r["name"])  # 原地刷新：删掉旧文件（连带旧缩略图）
+            r["media"] = "video" if is_video else "image"
         # 下一个槽位从**这一个节点自己的位置和高度**往下让开一点点：
         # 已有槽位的位置不会被改动（用户手动拖过就尊重用户），但间距得按它的实际
         # 高度算，否则节点调矮之后中间会空出一大截。吸附开着时向上吸到格点，
@@ -1057,6 +1102,20 @@ def _commit(
         )
         dest = ws.image_dir(create=True) / f"{r['name']}{src.suffix.lower()}"
         shutil.move(str(src), str(dest))
+        if is_video:
+            # 元信息与缩略图在**搬完之后**就地补齐（不是每次 /api/state 都跑 ffprobe）：
+            # 界面上的时长 / 分辨率、以及节点上那张封面都从这里来。
+            media_mod.refresh(
+                r, dest, ws.poster_dir(create=True) / f"{r['name']}.jpg"
+            )
+            if r.get("duration"):
+                emit(
+                    f"[engine] 视频 {r['name']}{src.suffix.lower()}  "
+                    f"{r.get('width')}×{r.get('height')}  {r['duration']:.1f}s"
+                )
+        else:
+            for key in ("duration", "fps", "frames"):
+                r.pop(key, None)
 
     drop_tree(run_dir)
 
@@ -1077,5 +1136,5 @@ def _commit(
                 d["dirty"] = True
 
     emit("")
-    emit(f"[engine] 完成，共 {len(produced)} 张输出")
+    emit(f"[engine] 完成，共 {len(produced)} 个输出")
     return True, None

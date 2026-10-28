@@ -28,9 +28,19 @@ import uuid
 from pathlib import Path
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+
+# 视频（2026-10-28 加）。数据节点从「只能放图」变成「能放媒体」，两种文件共用
+# 同一个池子、同一套短名（`A.png` / `A.mp4`）—— 名字是节点身份，扩展名只是文件本身。
+# 判据只看扩展名，**不看内容**：这里不做容器嗅探，浏览器打不开的容器由前端报错。
+VIDEO_EXTS = {".mp4", ".mov", ".webm", ".m4v", ".mkv", ".avi"}
+MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
+
 GRAPH_FILE = "graph.json"
 CANVASES_DIR = "canvases"
 IMAGES_DIR = "images"
+# 视频缩略图（首帧转出来的 jpg）单独存一个目录，**不能**和媒体文件放一起：
+# `image_path()` 是按 `A.*` 找文件的，`A.poster.jpg` 会被当成 A 的另一个版本。
+POSTERS_DIR = "posters"
 TMP_DIR = ".tmp"
 TRASH_DIR = ".trash"
 LEGACY_IMAGES_DIR = "images"   # v1 的顶层图片目录
@@ -187,6 +197,17 @@ class Workspace:
         if create:
             d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def poster_dir(self, canvas_id: str, create: bool = False) -> Path:
+        d = self.canvas_dir(canvas_id) / POSTERS_DIR
+        if create:
+            d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def poster_path(self, canvas_id: str, name: str) -> Path | None:
+        """视频节点的缩略图（`<name>.jpg`），没有就返回 None。"""
+        p = self.poster_dir(canvas_id) / f"{name}.jpg"
+        return p if p.is_file() else None
 
     # ---------------- 文档读写 ----------------
     def load_doc(self) -> dict:
@@ -348,19 +369,28 @@ class Workspace:
         raise RuntimeError("名字池耗尽")
 
     def image_path(self, canvas_id: str, name: str) -> Path | None:
-        """按名字解析图片文件：canvases/<画布id>/images/<name>.<ext>"""
+        """按名字解析媒体文件：canvases/<画布id>/images/<name>.<ext>
+
+        图片和视频都在这个池子里（扩展名决定是哪种），所以这里按 `MEDIA_EXTS` 找。
+        返回的文件可能是 mp4 —— 调用方要么只关心「有没有文件」，要么自己看后缀。
+        """
         for p in sorted(self.image_dir(canvas_id).glob(f"{name}.*")):
-            if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
+            if p.is_file() and p.suffix.lower() in MEDIA_EXTS:
                 return p
         return None
 
     def copy_image(self, src_canvas_id: str, dst_canvas_id: str, src_name: str, dst_name: str) -> bool:
-        """把一张图复制一份到另一个画布（跨画布粘贴用）。返回是否成功。"""
+        """把一张图 / 一段视频复制一份到另一个画布（跨画布粘贴用）。返回是否成功。"""
         src = self.image_path(src_canvas_id, src_name)
         if src is None:
             return False
         try:
             shutil.copy2(src, self.image_dir(dst_canvas_id, create=True) / f"{dst_name}{src.suffix.lower()}")
+            # 视频的缩略图跟着一起搬 —— 否则粘贴过去的视频会闪一下「无缩略图」，
+            # 直到有人重新探测一次
+            poster = self.poster_path(src_canvas_id, src_name)
+            if poster is not None:
+                shutil.copy2(poster, self.poster_dir(dst_canvas_id, create=True) / f"{dst_name}.jpg")
             return True
         except BaseException:  # noqa: BLE001
             return False
@@ -386,6 +416,17 @@ class Workspace:
                 try:
                     p.unlink()
                     moved.append(p.name)
+                except BaseException:  # noqa: BLE001
+                    pass
+        # 缩略图没有名字可复用（固定 `<name>.jpg`），跟着媒体文件一起清掉；
+        # 漏掉不会出错，只会留下一堆没人认领的 jpg
+        poster = self.poster_path(canvas_id, name)
+        if poster is not None:
+            try:
+                poster.rename(self.trash_dir / f"{uuid.uuid4().hex}.jpg")
+            except BaseException:  # noqa: BLE001
+                try:
+                    poster.unlink()
                 except BaseException:  # noqa: BLE001
                     pass
         return moved
@@ -437,6 +478,12 @@ class CanvasView:
 
     def image_path(self, name: str) -> Path | None:
         return self.ws.image_path(self.id, name)
+
+    def poster_dir(self, create: bool = False) -> Path:
+        return self.ws.poster_dir(self.id, create=create)
+
+    def poster_path(self, name: str) -> Path | None:
+        return self.ws.poster_path(self.id, name)
 
     def used_names(self, canvas: dict) -> set[str]:
         return self.ws.used_names(canvas)

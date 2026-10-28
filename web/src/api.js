@@ -125,6 +125,11 @@ export const deleteColor = (id) =>
   fetch(`/api/colors/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(J)
 
 /* 图片池是按画布分的，所以取图**必须带画布 id** ——
-   两个画布各有一个 A 是完全正常的，少了 id 会把别的画布的 A 拿过来 */
+   两个画布各有一个 A 是完全正常的，少了 id 会把别的画布的 A 拿过来。
+   视频节点的媒体文件和图片走**同一条路由**（池子只有一个，扩展名区分类型）；
+   缩略图另有一条 —— 它存在 posters/ 里，不混进媒体池（见 server/workspace.py） */
 export const imageUrl = (canvasId, name, mtime) =>
   `/api/images/${encodeURIComponent(canvasId || '')}/${encodeURIComponent(name)}?v=${mtime || 0}`
+
+export const posterUrl = (canvasId, name, mtime) =>
+  `/api/posters/${encodeURIComponent(canvasId || '')}/${encodeURIComponent(name)}?v=${mtime || 0}`

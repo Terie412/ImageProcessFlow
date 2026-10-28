@@ -17,6 +17,7 @@ import RegionEditor from './RegionEditor'
 import { RESOURCE_DRAG_MIME } from './ResourcePanel'
 import SidePanel from './SidePanel'
 import ImageViewer from './ImageViewer'
+import VideoViewer from './VideoViewer'
 
 const nodeTypes = { resource: ResourceNode, process: ProcessNode }
 const PRO_OPTIONS = { hideAttribution: true }
@@ -882,6 +883,7 @@ export default function App() {
   }, [])
   // 双击数据节点 → 打开大图查看器（缩略图太小，抠图这种活必须能放大看）
   // 查看器本体在 ImageViewer.jsx —— 资源面板里的图片文件双击也走同一个组件
+  // 视频节点走 VideoViewer（播放器）：像素读数 / 丈量那套对视频没有意义
   const onNodeDoubleClick = useCallback((evt, node) => {
     const d = node?.data
     if (node?.type !== 'resource' || !d?.hasImage) return
@@ -894,6 +896,9 @@ export default function App() {
       alpha: d.alpha,
       kind: d.kind,
       index: d.index,
+      media: d.media || 'image',
+      duration: d.duration,
+      fps: d.fps,
     })
   }, [])
 
@@ -928,8 +933,11 @@ export default function App() {
         }
         return
       }
-      // ② 从操作系统拖进来的图片文件：走原来的上传导入
-      const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'))
+      // ② 从操作系统拖进来的图片 / 视频文件：走上传导入
+      //    视频也照收 —— 拖进来就是一个视频数据节点（服务端会探测元信息并抽封面）
+      const files = [...(e.dataTransfer?.files || [])].filter(
+        (f) => f.type.startsWith('image/') || f.type.startsWith('video/'),
+      )
       if (!files.length) return
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       setBusy(true)
@@ -1381,8 +1389,13 @@ export default function App() {
           >
             侧栏
           </button>
-          <button className="tb-act" onClick={() => importRef.current?.click()} disabled={!state?.workspace}>
-            ＋ 导入图片
+          <button
+            className="tb-act"
+            title="导入图片或视频（也可以直接从系统里拖进画布）"
+            onClick={() => importRef.current?.click()}
+            disabled={!state?.workspace}
+          >
+            ＋ 导入素材
           </button>
 
           <div className="settings-wrap">
@@ -1778,17 +1791,31 @@ export default function App() {
 
       {/* 双击数据节点打开的大图查看器（本体在 ImageViewer.jsx；资源面板里的图片文件双击也用它） */}
       {viewer ? (
-        <ImageViewer
-          src={api.imageUrl(state?.canvasId, viewer.name, viewer.mtime)}
-          badge={viewer.name}
-          badgeKind={viewer.kind === 'input' ? 'input' : 'output'}
-          subtitle={viewer.kind === 'input' ? '输入图' : `输出 #${(viewer.index ?? 0) + 1}`}
-          width={viewer.width}
-          height={viewer.height}
-          format={viewer.format}
-          alpha={viewer.alpha}
-          onClose={() => setViewer(null)}
-        />
+        viewer.media === 'video' ? (
+          <VideoViewer
+            src={api.imageUrl(state?.canvasId, viewer.name, viewer.mtime)}
+            badge={viewer.name}
+            badgeKind={viewer.kind === 'input' ? 'input' : 'output'}
+            subtitle={viewer.kind === 'input' ? '输入视频' : `输出 #${(viewer.index ?? 0) + 1}`}
+            width={viewer.width}
+            height={viewer.height}
+            duration={viewer.duration}
+            fps={viewer.fps}
+            onClose={() => setViewer(null)}
+          />
+        ) : (
+          <ImageViewer
+            src={api.imageUrl(state?.canvasId, viewer.name, viewer.mtime)}
+            badge={viewer.name}
+            badgeKind={viewer.kind === 'input' ? 'input' : 'output'}
+            subtitle={viewer.kind === 'input' ? '输入图' : `输出 #${(viewer.index ?? 0) + 1}`}
+            width={viewer.width}
+            height={viewer.height}
+            format={viewer.format}
+            alpha={viewer.alpha}
+            onClose={() => setViewer(null)}
+          />
+        )
       ) : null}
 
       {/* 双击处理节点上的实时预览缩略图打开的大图：图在服务端现画，不在图片池里，
@@ -1818,8 +1845,8 @@ export default function App() {
         />
       ) : null}
 
-      <input ref={importRef} type="file" accept="image/*" multiple hidden onChange={onPickFile} />
-      <input ref={replaceRef} type="file" accept="image/*" hidden onChange={onPickReplace} />
+      <input ref={importRef} type="file" accept="image/*,video/*" multiple hidden onChange={onPickFile} />
+      <input ref={replaceRef} type="file" accept="image/*,video/*" hidden onChange={onPickReplace} />
     </div>
   )
 }

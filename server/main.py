@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 import autosize
 import detect as detect_mod
 import engine as engine_mod
+import media as media_mod
 import nodespec
 import polish as polish_mod
 import preview as preview_mod
@@ -33,6 +34,8 @@ import registry as registry_mod
 from workspace import (
     COLOR_NAME_MAX,
     IMAGE_EXTS,
+    MEDIA_EXTS,
+    VIDEO_EXTS,
     CanvasView,
     Workspace,
     drop_tree,
@@ -548,19 +551,36 @@ def _decorate(g: dict, canvas_id: str | None = None, copied: bool = False) -> di
     settings = STATE["settings"]
     out = g if copied else json.loads(json.dumps(g))
     for r in out["resources"]:
+        # 数据节点现在可能是**视频**。`media` 是唯一的判据（老数据没有这个字段 = 图片）；
+        # 文件后缀在这里再校对一次 —— graph.json 被手改过时以磁盘上的真实文件为准。
+        is_video = (r.get("media") or "image") == "video"
         r["hasImage"] = False
         r["mtime"] = 0
-        r["width"] = None
-        r["height"] = None
         r["format"] = None
         r["alpha"] = None
+        r["posterMtime"] = 0
+        if not is_video:
+            r["width"] = None
+            r["height"] = None
         if w is not None and canvas_id:
             p = w.image_path(canvas_id, r.get("name", ""))
             if p is not None:
+                is_video = p.suffix.lower() in VIDEO_EXTS
+                r["media"] = "video" if is_video else "image"
                 r["hasImage"] = True
                 r["mtime"] = int(p.stat().st_mtime)
                 r["ext"] = p.suffix.lower()
-                if _PILImage is not None:
+                if is_video:
+                    r["format"] = p.suffix.lstrip(".").upper()
+                    # 元信息由导入 / 执行产出时写进 graph.json（见 media.refresh），
+                    # 这里**不重复探测** —— 每次刷新界面都跑两遍 ffprobe 不值当。
+                    # 只有在缺宽高时（手工塞进来的文件）才补一次。
+                    if not (r.get("width") and r.get("height")):
+                        media_mod.refresh(r, p, None)
+                    poster = w.poster_path(canvas_id, r["name"])
+                    if poster is not None:
+                        r["posterMtime"] = int(poster.stat().st_mtime)
+                elif _PILImage is not None:
                     try:
                         # Pillow 打开图片只读文件头，拿到尺寸和格式就关闭
                         with _PILImage.open(p) as im:
@@ -1165,6 +1185,18 @@ def api_image(name: str):
     return FileResponse(p, headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/api/posters/{cid}/{name}")
+def api_poster(cid: str, name: str):
+    """视频数据节点的缩略图（首帧 jpg，导入 / 执行产出时生成）。
+
+    和视频文件分开一条路由，是因为它不在媒体池里 —— 见 workspace.POSTERS_DIR 的说明。
+    """
+    p = ws().poster_path(cid, name)
+    if p is None:
+        raise HTTPException(404, "缩略图不存在")
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+
 # --------------------------------------------------------------------------
 # 资源目录：工作目录之外的**只读**素材来源
 #
@@ -1249,6 +1281,7 @@ def _list_dir(rel: str) -> dict:
             ext = Path(it.name).suffix.lower()
             entry["ext"] = ext
             entry["isImage"] = ext in IMAGE_EXTS
+            entry["isVideo"] = ext in VIDEO_EXTS
             try:
                 st = it.stat()
                 entry["size"] = st.st_size
@@ -1622,10 +1655,10 @@ def api_color_delete(cid: str):
 
 @app.post("/api/resources/import-from-resource")
 def api_import_from_resource(payload: dict):
-    """把资源目录里的一个图片文件**复制一份**进当前画布的图片池，成为数据节点。
+    """把资源目录里的一个图片 / 视频文件**复制一份**进当前画布的图片池，成为数据节点。
 
     与 `/api/resources/import` 的区别只有一个：源文件在本地磁盘上，服务端直接
-    复制 —— 不经浏览器上传，大图不会在前后端之间来回搬。原文件**不动**（资源目录只读）。
+    复制 —— 不经浏览器上传，大文件不会在前后端之间来回搬。原文件**不动**（资源目录只读）。
     """
     body = payload or {}
     rel = body.get("path", "")
@@ -1633,8 +1666,8 @@ def api_import_from_resource(payload: dict):
     if not src.is_file():
         raise HTTPException(404, f"文件不存在：{rel}")
     ext = src.suffix.lower()
-    if ext not in IMAGE_EXTS:
-        raise HTTPException(400, f"不是图片文件：{src.name}")
+    if ext not in MEDIA_EXTS:
+        raise HTTPException(400, f"不是图片或视频文件：{src.name}")
 
     v = view()
     with LOCK:
@@ -1654,6 +1687,8 @@ def api_import_from_resource(payload: dict):
             # 复制失败就把刚加的节点撤掉 —— 别在画布上留一个指向不存在文件的空壳
             g["resources"].remove(r)
             raise HTTPException(500, f"复制失败：{e}") from e
+        if ext in VIDEO_EXTS:
+            media_mod.refresh(r, dest, v.poster_dir(create=True) / f"{r['name']}.jpg")
         persist()
     schedule_purge()
     return state_payload()
@@ -1669,7 +1704,7 @@ async def api_import_resource(
     x: float = Form(0),
     y: float = Form(0),
 ):
-    """从外部拖入 / 选择图片 → 复制一份到**当前画布的图片池**，成为数据节点。
+    """从外部拖入 / 选择图片或视频 → 复制一份到**当前画布的图片池**，成为数据节点。
 
     若给了 resource_id，则表示「替换某个输入图的图片」（见 DESIGN.md §2.2.2 C8）。
     """
@@ -1677,7 +1712,7 @@ async def api_import_resource(
         cid = canvas()["id"]
     v = ws().view(cid)
     ext = Path(file.filename or "img.png").suffix.lower()
-    if ext not in IMAGE_EXTS:
+    if ext not in MEDIA_EXTS:
         ext = ".png"
 
     # 先把上传内容落到临时目录，**不占锁** —— 这一步可能要好几秒（几 MB 的图），
@@ -1709,6 +1744,15 @@ async def api_import_resource(
 
         dest = v.image_dir(create=True) / f"{r['name']}{ext}"
         shutil.move(str(tmp), str(dest))
+
+        # 视频要顺手把「时长 / 分辨率 / 帧率」和一张封面记进 graph.json：
+        # 之后每次 /api/state 直接读这几个字段，不用再跑 ffprobe（见 _decorate）。
+        if ext in VIDEO_EXTS:
+            media_mod.refresh(r, dest, v.poster_dir(create=True) / f"{r['name']}.jpg")
+        else:
+            r["media"] = "image"
+            for key in ("duration", "fps", "frames"):
+                r.pop(key, None)
 
         # R5 / C8：给直接下游处理节点打脏标记
         for e in g["edges"]:
@@ -2150,9 +2194,23 @@ def api_create_edge(payload: dict):
 
         dst_proc = engine_mod._process(g, dst)  # noqa: SLF001
         manifest = STATE["registry"].get(dst_proc["defId"])
-        valid = {s["key"] for s in registry_mod.port_specs(manifest or {}, dst_proc)}
+        port_types = {
+            s["key"]: (s.get("type") or "image")
+            for s in registry_mod.port_specs(manifest or {}, dst_proc)
+        }
+        valid = set(port_types)
         if port not in valid:
             raise HTTPException(400, f"该节点没有输入口 {port}")
+
+        # 类型要配对：视频口只接视频节点，图片口只接图片节点。
+        # 不校验的话，把一个视频接到「裁剪」上会一路顺利到执行阶段才炸（PIL 打不开 mp4），
+        # 报错还发生在几十秒之后 —— 在这里拦下来，话说清楚。
+        src_media = "video" if (engine_mod._resource(g, src).get("media") == "video") else "image"  # noqa: SLF001
+        want = port_types[port]
+        if want == "video" and src_media != "video":
+            raise HTTPException(400, "这个输入口只接视频节点")
+        if want != "video" and src_media == "video":
+            raise HTTPException(400, "这个输入口只接图片，视频节点接不进来（视频请接「AI 视频编辑」）")
 
         # 一个输入口只能接一个来源
         for e in list(g["edges"]):
@@ -2208,6 +2266,9 @@ def api_fill_inputs(pid: str, payload: dict):
                 continue
             seen.add(rid)
             picked.append(r)
+        # 类型过滤：视频口只认视频节点，图片口只认图片节点（口径与 create_edge 一致）
+        want_video = (inputs[0].get("type") or "image") == "video"
+        picked = [r for r in picked if ((r.get("media") == "video") == want_video)]
         if not picked:
             raise HTTPException(400, "选中的数据节点里没有可作输入的（本节点自己的产出会被排除）")
 

@@ -279,6 +279,26 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .thumb .ph { color: #4d5563; padding: 24px 0; font-size: 11px; }
 
+/* 视频节点的缩略图：服务端抽的首帧 + 居中的播放角标。
+   刻意**不**放 <video> —— 一张画布上几十个视频节点同时解码会把渲染进程拖住，
+   而缩略图只需要一帧静态画面。 */
+.video-shot {
+  position: relative; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+/* 覆盖 .thumb img 的棋盘格底：视频没有透明区，垫格子只会让人以为哪里透明 */
+.video-shot img {
+  background-color: #000; background-image: none;
+}
+.video-badge {
+  position: absolute; right: 8px; bottom: 8px;
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: rgba(12, 14, 18, .62);
+  border: 1px solid rgba(255, 255, 255, .18);
+  pointer-events: none;   /* 别挡住双击开播放器 */
+}
+
 .node-foot {
   display: flex; align-items: center; gap: 6px;
   /* 右侧留出 12px 给右下角的缩放手柄（手柄现在贴在**真正的角**上，见 .resize-handle）。
@@ -976,6 +996,14 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
 }
 .viewer-stage.actual img {
   max-width: none; max-height: none;   /* 1:1，超出就滚动 */
+}
+/* 视频播放器：占满整块舞台（顶部留一点、左右居中）。尺寸交给浏览器按视频本身算，
+   不设 width/height —— 竖屏视频拉满宽度会被撑变形。 */
+.viewer-video { display: flex; align-items: center; justify-content: center; padding: 16px; }
+.viewer-video video {
+  max-width: 100%; max-height: 100%;
+  background: #000; border-radius: 6px;
+  outline: none;
 }
 
 /* React Flow 控件深色化 */
