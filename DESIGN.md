@@ -1769,6 +1769,7 @@ PIL 是逐通道糊的，RGBA 上 alpha 会跟着变软 —— **刻意的**：�
 
 > 媒体本体走原有的 `/api/images/...`（`FileResponse` 已支持 Range，所以 `<video>` 拖进度条是真 seek），封面走 `/api/posters/<画布>/<名>`。
 > 前端：封面 + 播放角标当缩略图（**不用 `<video>` 当缩略图** —— 一屏几十个视频节点同时解码会卡），双击开 `VideoViewer`（原生播放器），像素读数 / 丈量那套对视频没有意义，所以不复用 `ImageViewer`。
+> 原生控件里没有循环按钮，所以顶栏自己给一个「循环」开关（`<video loop>`）：纯界面偏好，记 `localStorage['ipf.videoLoop']`，不进 `graph.json`；默认关，改过一次就记住。已经播完停在末帧时打开循环，手动拉回 `currentTime = 0` 再 `play()` —— 浏览器不会因为属性变更自己重来一遍。
 
 #### 端口类型要配对
 
