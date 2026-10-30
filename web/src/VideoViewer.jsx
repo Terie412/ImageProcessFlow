@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 /* 视频大图（双击视频数据节点打开）。
  *
@@ -9,6 +9,9 @@ import React, { useEffect, useRef } from 'react'
  *
  * 播放地址就是媒体文件本身（`/api/images/<画布>/<名>`）。Starlette 的 FileResponse
  * 支持 Range 请求，所以拖进度条是真的 seek，不是重新下载整个文件。
+ *
+ * 「循环」是纯界面偏好，记 localStorage（`ipf.videoLoop`），不进 graph.json —— 跟
+ * 左侧侧栏展开状态一个路数。浏览器原生控件里没有循环按钮，所以自己给一个。
  */
 export default function VideoViewer({
   src,
@@ -34,6 +37,26 @@ export default function VideoViewer({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // 循环开关：只影响播放器，不碰节点数据。默认关（跟改动前行为一致），
+  // 开过一次之后记住，下次双击视频还是开着。
+  const [loop, setLoop] = useState(() => {
+    try { return localStorage.getItem('ipf.videoLoop') === '1' } catch (e) { return false }
+  })
+  const videoRef = useRef(null)
+  const toggleLoop = useCallback(() => {
+    const nv = !loop
+    setLoop(nv)
+    try { localStorage.setItem('ipf.videoLoop', nv ? '1' : '0') } catch (e) { /* 隐私模式下写不了，忽略 */ }
+    // 已经播完停在最后一帧时打开循环，浏览器不会自己重来一遍 —— 手动拉回开头再放
+    const el = videoRef.current
+    if (nv && el && el.ended) {
+      try {
+        el.currentTime = 0
+        el.play()?.catch(() => {})
+      } catch (e) { /* 播放被拦（自动播放策略），用户自己点播放就行 */ }
+    }
+  }, [loop])
+
   const meta = [
     width && height ? `${width} × ${height}` : null,
     typeof duration === 'number' && duration > 0 ? `${duration.toFixed(2)}s` : null,
@@ -47,12 +70,19 @@ export default function VideoViewer({
         {subtitle ? <span className="viewer-name" title={subtitle}>{subtitle}</span> : null}
         <span className="spacer" />
         <span className="viewer-meta">{meta.join(' · ')}</span>
+        <button
+          className={loop ? 'tiny loop primary' : 'tiny loop'}
+          onClick={toggleLoop}
+          title={loop ? '循环播放：已开启，点一下关掉' : '循环播放：点一下开启'}
+        >
+          {loop ? '循环 开' : '循环'}
+        </button>
         <button className="tiny" onClick={() => closeRef.current?.()}>
           关闭 (Esc)
         </button>
       </div>
       <div className="viewer-stage fit viewer-video">
-        <video src={src} controls autoPlay playsInline preload="auto" />
+        <video ref={videoRef} src={src} controls autoPlay playsInline preload="auto" loop={loop} />
       </div>
     </div>
   )

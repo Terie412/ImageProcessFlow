@@ -946,6 +946,9 @@ button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err)
   color: var(--muted); font-size: 12px;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+/* 视频播放器的循环开关：文案在「循环 / 循环 开」之间变长变短，定宽兜底，
+   免得把右边的「关闭」顶得左右跳（同 .viewer-pixel 的思路） */
+.viewer-bar button.loop { min-width: 66px; text-align: center; }
 /* 光标下那一像素的读数（顶栏里实时更新）。宽度兜底，免得数字变化把右侧按钮顶得乱跳 */
 .viewer-pixel {
   display: flex; align-items: center; gap: 8px;
